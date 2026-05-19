@@ -1,0 +1,24 @@
+{
+  "name": "codex-bots",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.3",
+  "description": "Local AI assistant prototype with Codex CLI subscription auth bridge",
+  "bin": {
+    "codex-bots": "dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "chat": "tsx src/cli.ts chat",
+    "auth": "tsx src/cli.ts auth login",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
