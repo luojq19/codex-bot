@@ -6,6 +6,7 @@ import { DEFAULT_MODEL } from "./models.js";
 export type AppConfig = {
   codexCommand: string;
   model: string;
+  webSearchEnabled: boolean;
   execArgsTemplate: string[];
 };
 
@@ -27,6 +28,7 @@ const DEFAULT_EXEC_ARGS_TEMPLATE = [
 const DEFAULT_CONFIG: AppConfig = {
   codexCommand: "codex",
   model: DEFAULT_MODEL,
+  webSearchEnabled: true,
   execArgsTemplate: DEFAULT_EXEC_ARGS_TEMPLATE
 };
 
@@ -59,11 +61,16 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 function normalizeConfig(config: AppConfig): AppConfig {
+  const normalized = {
+    ...config,
+    webSearchEnabled: typeof config.webSearchEnabled === "boolean" ? config.webSearchEnabled : true
+  };
+
   if (!Array.isArray(config.execArgsTemplate) || hasLegacyExecArgs(config.execArgsTemplate)) {
-    return { ...config, execArgsTemplate: DEFAULT_EXEC_ARGS_TEMPLATE };
+    return { ...normalized, execArgsTemplate: DEFAULT_EXEC_ARGS_TEMPLATE };
   }
 
-  return config;
+  return normalized;
 }
 
 function hasLegacyExecArgs(args: string[]): boolean {

@@ -202,6 +202,16 @@ async function handleConfig(
       console.log(`Codex command set to ${codexCommand}`);
       return;
     }
+    case "set-web-search": {
+      const value = args[0];
+      if (value !== "on" && value !== "off") {
+        throw new Error("Usage: config set-web-search on|off");
+      }
+      config.webSearchEnabled = value === "on";
+      await saveConfig(config);
+      console.log(`Web search ${config.webSearchEnabled ? "enabled" : "disabled"}`);
+      return;
+    }
     default:
       console.error(`Unknown config command: ${subcommand}`);
       process.exitCode = 1;
@@ -227,6 +237,7 @@ Usage:
   codex-bots config show
   codex-bots config set-model <model-id>
   codex-bots config set-codex-command <command>
+  codex-bots config set-web-search on|off
 `);
 }
 

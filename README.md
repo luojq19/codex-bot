@@ -41,6 +41,9 @@ Inside chat:
 ```text
 /model gpt-5.5
 /models
+/search status
+/search off
+/search on
 /auth
 /schedule
 /schedule list
@@ -82,6 +85,25 @@ Then enter:
 
 The chatbot will ask for the task name, trigger type, schedule, model, prompt, and final confirmation.
 
+## Web Search
+
+Web search is enabled by default through Codex CLI's native `--search` flag. This makes the Responses `web_search` tool available to Codex; Codex still decides whether a specific prompt needs to search.
+
+Toggle it globally:
+
+```bash
+pnpm dev config set-web-search on
+pnpm dev config set-web-search off
+```
+
+Toggle it inside chat:
+
+```text
+/search status
+/search off
+/search on
+```
+
 The local server exposes:
 
 ```text
@@ -95,7 +117,7 @@ GET    /runs?taskId=&limit=
 
 ## Notes
 
-- The chatbot calls `codex --ask-for-approval never exec --sandbox read-only -m <model> <prompt>` for each turn.
+- The chatbot calls `codex --ask-for-approval never --search exec --sandbox read-only -m <model> <prompt>` by default.
 - It uses `--output-last-message` internally so only the final assistant response is shown.
 - Conversation history is maintained by this app and included in each prompt.
 - Available subscription models can vary by account and Codex CLI version. Use `/model <id>` to try a custom model.

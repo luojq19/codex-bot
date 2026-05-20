@@ -69,7 +69,7 @@ export class CodexCli {
   async complete(model: string, prompt: string): Promise<string> {
     const outputDir = await mkdtemp(join(tmpdir(), "codex-bots-"));
     const outputPath = join(outputDir, "last-message.txt");
-    const args = this.config.execArgsTemplate.map((arg) => arg.replaceAll("{model}", model));
+    const args = buildExecArgs(this.config, model);
 
     try {
       const result = await runCommand(this.config.codexCommand, [...args, "--output-last-message", outputPath, prompt]);
@@ -85,6 +85,20 @@ export class CodexCli {
       await rm(outputDir, { recursive: true, force: true });
     }
   }
+}
+
+function buildExecArgs(config: AppConfig, model: string): string[] {
+  const args = config.execArgsTemplate.map((arg) => arg.replaceAll("{model}", model));
+  if (!config.webSearchEnabled || args.includes("--search")) {
+    return args;
+  }
+
+  const execIndex = args.indexOf("exec");
+  if (execIndex < 0) {
+    return ["--search", ...args];
+  }
+
+  return [...args.slice(0, execIndex), "--search", ...args.slice(execIndex)];
 }
 
 async function fileExists(path: string): Promise<boolean> {

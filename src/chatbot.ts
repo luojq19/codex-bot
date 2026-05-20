@@ -35,7 +35,8 @@ export async function startChat(config: AppConfig): Promise<void> {
   const history: ChatMessage[] = [];
 
   console.log(`Codex chatbot ready. Model: ${config.model}`);
-  console.log("Commands: /model <id>, /models, /auth, /schedule, /clear, /help, /quit");
+  console.log(`Web search: ${config.webSearchEnabled ? "on" : "off"}`);
+  console.log("Commands: /model <id>, /models, /search, /auth, /schedule, /clear, /help, /quit");
 
   while (true) {
     const line = (await rl.question("\nYou> ")).trim();
@@ -93,6 +94,9 @@ async function handleCommand(
       console.log(formatModels(config.model));
       console.log("You can also run /model <custom-model-id>.");
       return true;
+    case "/search":
+      await handleSearchCommand(args, config);
+      return true;
     case "/auth": {
       const status = await codex.status();
       console.log(status.message);
@@ -111,7 +115,7 @@ async function handleCommand(
       await handleScheduleCommand(args, config, rl);
       return true;
     case "/help":
-      console.log("Commands: /model <id>, /models, /auth, /clear, /schedule, /help, /quit");
+      console.log("Commands: /model <id>, /models, /search on|off|status, /auth, /clear, /schedule, /help, /quit");
       console.log(`Config: ${getConfigPath()}`);
       return true;
     case "/quit":
@@ -120,6 +124,28 @@ async function handleCommand(
     default:
       console.log(`Unknown command: ${command}`);
       return true;
+  }
+}
+
+async function handleSearchCommand(args: string[], config: AppConfig): Promise<void> {
+  const [subcommand = "status"] = args;
+
+  switch (subcommand) {
+    case "on":
+      config.webSearchEnabled = true;
+      await saveConfig(config);
+      console.log("Web search enabled. Codex may use web_search when it decides the answer needs it.");
+      return;
+    case "off":
+      config.webSearchEnabled = false;
+      await saveConfig(config);
+      console.log("Web search disabled.");
+      return;
+    case "status":
+      console.log(`Web search: ${config.webSearchEnabled ? "on" : "off"}`);
+      return;
+    default:
+      console.log("Usage: /search on, /search off, /search status");
   }
 }
 
