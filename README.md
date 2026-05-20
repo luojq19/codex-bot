@@ -42,8 +42,55 @@ Inside chat:
 /model gpt-5.5
 /models
 /auth
+/schedule
+/schedule list
+/schedule remove <id>
+/schedule run-now <id>
 /clear
 /quit
+```
+
+## Scheduled Tasks
+
+Start the local scheduler server:
+
+```bash
+pnpm dev server start
+```
+
+Create and manage tasks from the CLI:
+
+```bash
+pnpm dev tasks add --name digest --every 1h --prompt "Summarize what I should focus on next."
+pnpm dev tasks add --name morning --cron "0 9 * * *" --timezone America/New_York --prompt "Prepare a morning briefing."
+pnpm dev tasks list
+pnpm dev tasks run-now <id>
+pnpm dev runs list --limit 20
+```
+
+Create tasks from chat:
+
+```bash
+pnpm dev chat
+```
+
+Then enter:
+
+```text
+/schedule
+```
+
+The chatbot will ask for the task name, trigger type, schedule, model, prompt, and final confirmation.
+
+The local server exposes:
+
+```text
+GET    /health
+GET    /tasks
+POST   /tasks
+DELETE /tasks/:id
+POST   /tasks/:id/run
+GET    /runs?taskId=&limit=
 ```
 
 ## Notes

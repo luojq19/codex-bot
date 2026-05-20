@@ -1,0 +1,64 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { DEFAULT_MODEL } from "../models.js";
+import { buildCreateTaskInput } from "../taskInputs.js";
+import { calculateNextRunAt, parseInterval } from "./schedule.js";
+
+const config = {
+  codexCommand: "codex",
+  model: DEFAULT_MODEL,
+  execArgsTemplate: []
+};
+
+test("parseInterval supports minutes, hours, and days", () => {
+  assert.equal(parseInterval("10m"), 10 * 60 * 1000);
+  assert.equal(parseInterval("1h"), 60 * 60 * 1000);
+  assert.equal(parseInterval("1d"), 24 * 60 * 60 * 1000);
+});
+
+test("parseInterval rejects invalid values", () => {
+  assert.throws(() => parseInterval("0m"), /positive/);
+  assert.throws(() => parseInterval("5x"), /Invalid interval/);
+});
+
+test("calculateNextRunAt supports cron schedules", () => {
+  const next = calculateNextRunAt(
+    {
+      type: "cron",
+      expression: "0 9 * * *",
+      timezone: "UTC"
+    },
+    new Date("2026-05-19T08:00:00.000Z")
+  );
+  assert.equal(next, "2026-05-19T09:00:00.000Z");
+});
+
+test("buildCreateTaskInput requires exactly one schedule kind", () => {
+  assert.throws(
+    () =>
+      buildCreateTaskInput(
+        {
+          name: "demo",
+          prompt: "hello",
+          every: "1h",
+          cron: "0 9 * * *"
+        },
+        config
+      ),
+    /either --every or --cron/
+  );
+});
+
+test("buildCreateTaskInput defaults model from config", () => {
+  const input = buildCreateTaskInput(
+    {
+      name: "demo",
+      prompt: "hello",
+      every: "1h"
+    },
+    config
+  );
+
+  assert.equal(input.model, DEFAULT_MODEL);
+  assert.deepEqual(input.schedule, { type: "interval", everyMs: 60 * 60 * 1000 });
+});

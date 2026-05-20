@@ -14,11 +14,15 @@
     "auth": "tsx src/cli.ts auth login",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
     "start": "node dist/cli.js"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0"
+  },
+  "dependencies": {
+    "cron-parser": "^5.5.0"
   }
 }
