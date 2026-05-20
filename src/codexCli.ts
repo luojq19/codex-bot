@@ -16,6 +16,12 @@ export type CodexStatus = {
   message: string;
 };
 
+export type CodexCompleteOptions = {
+  cwd?: string;
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  webSearchEnabled?: boolean;
+};
+
 export class CodexCli {
   constructor(private readonly config: AppConfig) {}
 
@@ -66,10 +72,10 @@ export class CodexCli {
     }
   }
 
-  async complete(model: string, prompt: string): Promise<string> {
+  async complete(model: string, prompt: string, options: CodexCompleteOptions = {}): Promise<string> {
     const outputDir = await mkdtemp(join(tmpdir(), "codex-bots-"));
     const outputPath = join(outputDir, "last-message.txt");
-    const args = buildExecArgs(this.config, model);
+    const args = buildExecArgs(this.config, model, options);
 
     try {
       const result = await runCommand(this.config.codexCommand, [...args, "--output-last-message", outputPath, prompt]);
@@ -87,9 +93,13 @@ export class CodexCli {
   }
 }
 
-function buildExecArgs(config: AppConfig, model: string): string[] {
-  const args = config.execArgsTemplate.map((arg) => arg.replaceAll("{model}", model));
-  if (!config.webSearchEnabled || args.includes("--search")) {
+function buildExecArgs(config: AppConfig, model: string, options: CodexCompleteOptions): string[] {
+  const args = applyExecOptions(
+    config.execArgsTemplate.map((arg) => arg.replaceAll("{model}", model)),
+    options
+  );
+  const webSearchEnabled = options.webSearchEnabled ?? config.webSearchEnabled;
+  if (!webSearchEnabled || args.includes("--search")) {
     return args;
   }
 
@@ -99,6 +109,27 @@ function buildExecArgs(config: AppConfig, model: string): string[] {
   }
 
   return [...args.slice(0, execIndex), "--search", ...args.slice(execIndex)];
+}
+
+function applyExecOptions(args: string[], options: CodexCompleteOptions): string[] {
+  const updated = [...args];
+
+  if (options.sandbox) {
+    const sandboxIndex = updated.indexOf("--sandbox");
+    if (sandboxIndex >= 0 && sandboxIndex + 1 < updated.length) {
+      updated[sandboxIndex + 1] = options.sandbox;
+    } else {
+      const execIndex = updated.indexOf("exec");
+      updated.splice(execIndex >= 0 ? execIndex + 1 : updated.length, 0, "--sandbox", options.sandbox);
+    }
+  }
+
+  if (options.cwd) {
+    const execIndex = updated.indexOf("exec");
+    updated.splice(execIndex >= 0 ? execIndex + 1 : updated.length, 0, "-C", options.cwd);
+  }
+
+  return updated;
 }
 
 async function fileExists(path: string): Promise<boolean> {

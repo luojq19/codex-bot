@@ -5,11 +5,16 @@ export function formatTask(task: ScheduledTask): string {
   return [
     `${task.enabled ? "on " : "off"} ${task.id}`,
     `  name: ${task.name}`,
+    `  kind: ${task.kind ?? "prompt"}`,
     `  model: ${task.model}`,
     `  schedule: ${formatSchedule(task.schedule)}`,
+    task.workflow ? `  skill: ${task.workflow.skill}` : undefined,
+    task.delivery?.discordChannelId ? `  discord: ${task.delivery.discordChannelId}` : undefined,
     `  next: ${task.nextRunAt}`,
     `  prompt: ${task.prompt}`
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function formatTaskList(tasks: ScheduledTask[]): string {

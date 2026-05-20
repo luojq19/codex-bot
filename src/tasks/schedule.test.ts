@@ -62,3 +62,23 @@ test("buildCreateTaskInput defaults model from config", () => {
   assert.equal(input.model, DEFAULT_MODEL);
   assert.deepEqual(input.schedule, { type: "interval", everyMs: 60 * 60 * 1000 });
 });
+
+test("buildCreateTaskInput supports workflow skills and Discord delivery", () => {
+  const input = buildCreateTaskInput(
+    {
+      kind: "workflow",
+      name: "daily ai",
+      prompt: "",
+      skill: "literature-briefing",
+      workflowInput: "Track new AI agent papers.",
+      every: "1d",
+      discordChannelId: "123"
+    },
+    config
+  );
+
+  assert.equal(input.kind, "workflow");
+  assert.equal(input.workflow?.skill, "literature-briefing");
+  assert.equal(input.workflow?.input, "Track new AI agent papers.");
+  assert.equal(input.delivery?.discordChannelId, "123");
+});

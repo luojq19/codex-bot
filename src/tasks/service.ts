@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config.js";
 import { CodexCli } from "../codexCli.js";
+import { sendDiscordMessage } from "../connectors/discord/delivery.js";
+import { runSkillWorkflow } from "../workflows/engine.js";
 import { calculateNextRunAt, validateSchedule } from "./schedule.js";
 import { appendRun, readRuns, readTasks, writeTasks } from "./store.js";
 import type { CreateTaskInput, RunTaskOptions, ScheduledTask, TaskRunRecord } from "./types.js";
@@ -13,11 +15,14 @@ export async function createTask(input: CreateTaskInput): Promise<ScheduledTask>
   const isoNow = now.toISOString();
   const task: ScheduledTask = {
     id: randomUUID(),
+    kind: input.kind ?? "prompt",
     name: input.name.trim(),
     prompt: input.prompt.trim(),
     model: input.model.trim(),
     enabled: input.enabled ?? true,
     schedule: input.schedule,
+    workflow: input.workflow,
+    delivery: input.delivery,
     nextRunAt: calculateNextRunAt(input.schedule, now),
     createdAt: isoNow,
     updatedAt: isoNow
@@ -107,7 +112,11 @@ export async function runTask(task: ScheduledTask, config: AppConfig, options: R
   }
 
   try {
-    const output = await codex.complete(task.model, task.prompt);
+    const result =
+      task.kind === "workflow"
+        ? await runSkillWorkflow(task, config, runId)
+        : { output: await codex.complete(task.model, task.prompt), workspaceDir: undefined, artifacts: undefined };
+    await deliverTaskOutput(task, result.output);
     const record: TaskRunRecord = {
       runId,
       taskId: task.id,
@@ -115,7 +124,9 @@ export async function runTask(task: ScheduledTask, config: AppConfig, options: R
       startedAt,
       finishedAt: new Date().toISOString(),
       status: "success",
-      output
+      output: result.output,
+      workspaceDir: result.workspaceDir,
+      artifacts: result.artifacts
     };
     await appendRun(record);
     return record;
@@ -162,5 +173,28 @@ function validateTaskInput(input: CreateTaskInput): void {
   if (!input.model.trim()) {
     throw new Error("Task model is required.");
   }
+  if (input.kind === "workflow") {
+    if (!input.workflow?.skill.trim()) {
+      throw new Error("Workflow tasks require a skill.");
+    }
+    if (!input.workflow.input.trim()) {
+      throw new Error("Workflow tasks require input.");
+    }
+  }
   validateSchedule(input.schedule);
+}
+
+async function deliverTaskOutput(task: ScheduledTask, output: string): Promise<void> {
+  const channelId = task.delivery?.discordChannelId;
+  if (!channelId) {
+    return;
+  }
+
+  await sendDiscordMessage(channelId, formatDiscordTaskMessage(task, output));
+}
+
+function formatDiscordTaskMessage(task: ScheduledTask, output: string): string {
+  const title = `# ${task.name}\n`;
+  const body = output.length > 1800 ? `${output.slice(0, 1800)}\n\n...` : output;
+  return `${title}${body}`;
 }

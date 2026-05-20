@@ -71,6 +71,18 @@ pnpm dev tasks run-now <id>
 pnpm dev runs list --limit 20
 ```
 
+Create a skill-based workflow task that writes a report into `workspace/` and posts it to your default Discord channel:
+
+```bash
+pnpm dev tasks add \
+  --kind workflow \
+  --name daily-ai-literature \
+  --cron "0 8 * * *" \
+  --timezone America/New_York \
+  --skill literature-briefing \
+  --input "Prepare a daily briefing on frontier AI agents, reasoning models, and tool-use research."
+```
+
 Create tasks from chat:
 
 ```bash
@@ -84,6 +96,51 @@ Then enter:
 ```
 
 The chatbot will ask for the task name, trigger type, schedule, model, prompt, and final confirmation.
+
+Workflow runs create isolated directories under:
+
+```text
+workspace/<task-name>/<run-id>/
+```
+
+Each workflow workspace includes `skill.md`, `input.md`, `prompt.md`, and `report.md`.
+
+## Discord
+
+Create a Discord application and bot, then put the credentials in `default.env` at the repo root:
+
+```text
+DISCORD_BOT_TOKEN=...
+DISCORD_CLIENT_ID=...
+DISCORD_GUILD_ID=...              # recommended for fast slash-command registration
+DISCORD_DEFAULT_CHANNEL_ID=...    # optional default delivery target
+```
+
+`default.env` is loaded automatically by the CLI and is ignored by git.
+
+Register slash commands:
+
+```bash
+pnpm dev discord register-commands
+```
+
+Start the Discord bot:
+
+```bash
+pnpm dev discord start
+```
+
+Supported Discord commands:
+
+```text
+/ask question:<text>
+/reports latest
+/reports list
+/tasks list
+/tasks run-now id:<task-id>
+```
+
+The first MVP uses slash commands and bot replies. It does not require the privileged Message Content intent.
 
 ## Web Search
 

@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { handleUserMessage, type ConversationMessage } from "./assistant/router.js";
 import type { AppConfig } from "./config.js";
 import { getConfigPath, saveConfig } from "./config.js";
 import { CodexCli } from "./codexCli.js";
@@ -7,11 +8,6 @@ import { formatRunList, formatTask, formatTaskList } from "./format.js";
 import { formatModels } from "./models.js";
 import { buildCreateTaskInput, defaultTimezone, type TaskDraft } from "./taskInputs.js";
 import { createTask, getTask, listTasks, removeTask, runTask } from "./tasks/service.js";
-
-type ChatMessage = {
-  role: "user" | "assistant";
-  content: string;
-};
 
 export async function startChat(config: AppConfig): Promise<void> {
   const codex = new CodexCli(config);
@@ -32,7 +28,7 @@ export async function startChat(config: AppConfig): Promise<void> {
   }
 
   const rl = createInterface({ input, output });
-  const history: ChatMessage[] = [];
+  let history: ConversationMessage[] = [];
 
   console.log(`Codex chatbot ready. Model: ${config.model}`);
   console.log(`Web search: ${config.webSearchEnabled ? "on" : "off"}`);
@@ -57,11 +53,15 @@ export async function startChat(config: AppConfig): Promise<void> {
       continue;
     }
 
-    history.push({ role: "user", content: line });
-
     try {
-      const response = await codex.complete(config.model, buildPrompt(history));
-      history.push({ role: "assistant", content: response });
+      const result = await handleUserMessage(config, {
+        source: "cli",
+        text: line,
+        history,
+        model: config.model
+      });
+      history = result.history;
+      const response = result.response;
       console.log(`\nBot> ${response}`);
     } catch (error) {
       console.error(`\nCodex error: ${error instanceof Error ? error.message : String(error)}`);
@@ -73,7 +73,7 @@ async function handleCommand(
   line: string,
   config: AppConfig,
   codex: CodexCli,
-  history: ChatMessage[],
+  history: ConversationMessage[],
   rl: ReturnType<typeof createInterface>
 ): Promise<boolean> {
   const [command, ...args] = line.split(/\s+/);
@@ -200,6 +200,13 @@ async function runScheduleWizard(config: AppConfig, rl: ReturnType<typeof create
     return;
   }
 
+  const kind = await askChoice(rl, "Task kind (prompt/workflow)", ["prompt", "workflow"]);
+  if (kind === "/cancel") {
+    console.log("Schedule creation cancelled.");
+    return;
+  }
+  draft.kind = kind === "workflow" ? "workflow" : "prompt";
+
   const type = await askChoice(rl, "Trigger type (interval/cron)", ["interval", "cron"]);
   if (type === "/cancel") {
     console.log("Schedule creation cancelled.");
@@ -208,7 +215,7 @@ async function runScheduleWizard(config: AppConfig, rl: ReturnType<typeof create
 
   if (type === "interval") {
     const every = await askValid(rl, "Interval, e.g. 10m, 1h, 1d", (value) => {
-      buildCreateTaskInput({ ...draft, prompt: "placeholder", every: value }, config);
+      buildCreateTaskInput({ ...draft, kind: "prompt", prompt: "placeholder", every: value }, config);
     });
     if (every === "/cancel") {
       console.log("Schedule creation cancelled.");
@@ -217,7 +224,10 @@ async function runScheduleWizard(config: AppConfig, rl: ReturnType<typeof create
     draft.every = every;
   } else {
     const cron = await askValid(rl, "Cron expression, e.g. 0 9 * * *", (value) => {
-      buildCreateTaskInput({ ...draft, prompt: "placeholder", cron: value, timezone: defaultTimezone() }, config);
+      buildCreateTaskInput(
+        { ...draft, kind: "prompt", prompt: "placeholder", cron: value, timezone: defaultTimezone() },
+        config
+      );
     });
     if (cron === "/cancel") {
       console.log("Schedule creation cancelled.");
@@ -240,18 +250,49 @@ async function runScheduleWizard(config: AppConfig, rl: ReturnType<typeof create
   }
   draft.model = model || config.model;
 
-  const prompt = await askRequired(rl, "Prompt to run");
-  if (prompt === "/cancel") {
-    console.log("Schedule creation cancelled.");
-    return;
+  if (draft.kind === "workflow") {
+    const skill = await askOptional(rl, "Skill [literature-briefing]");
+    if (skill === "/cancel") {
+      console.log("Schedule creation cancelled.");
+      return;
+    }
+    draft.skill = skill || "literature-briefing";
+
+    const workflowInput = await askRequired(rl, "Workflow input");
+    if (workflowInput === "/cancel") {
+      console.log("Schedule creation cancelled.");
+      return;
+    }
+    draft.workflowInput = workflowInput;
+    draft.prompt = workflowInput;
+
+    const discordChannel = await askOptional(rl, "Discord channel id [env default or blank]");
+    if (discordChannel === "/cancel") {
+      console.log("Schedule creation cancelled.");
+      return;
+    }
+    draft.discordChannelId = discordChannel || undefined;
+  } else {
+    const prompt = await askRequired(rl, "Prompt to run");
+    if (prompt === "/cancel") {
+      console.log("Schedule creation cancelled.");
+      return;
+    }
+    draft.prompt = prompt;
   }
-  draft.prompt = prompt;
 
   const input = buildCreateTaskInput(draft, config);
   console.log("\nTask preview:");
   console.log(`  name: ${input.name}`);
+  console.log(`  kind: ${input.kind}`);
   console.log(`  model: ${input.model}`);
   console.log(`  prompt: ${input.prompt}`);
+  if (input.workflow) {
+    console.log(`  skill: ${input.workflow.skill}`);
+  }
+  if (input.delivery?.discordChannelId) {
+    console.log(`  discord channel: ${input.delivery.discordChannelId}`);
+  }
   console.log(
     input.schedule.type === "interval"
       ? `  schedule: every ${draft.every}`
@@ -319,21 +360,4 @@ async function askValid(
       console.log(error instanceof Error ? error.message : String(error));
     }
   }
-}
-
-function buildPrompt(history: ChatMessage[]): string {
-  const transcript = history
-    .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
-    .join("\n\n");
-
-  return [
-    "You are a concise, helpful chatbot.",
-    "Answer the latest user message using the conversation history.",
-    "Do not edit local files, run shell commands, or perform coding-agent actions.",
-    "",
-    "Conversation:",
-    transcript,
-    "",
-    "Assistant:"
-  ].join("\n");
 }

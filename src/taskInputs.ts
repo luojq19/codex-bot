@@ -9,15 +9,34 @@ export type TaskDraft = {
   every?: string;
   cron?: string;
   timezone?: string;
+  kind?: "prompt" | "workflow";
+  skill?: string;
+  workflowInput?: string;
+  discordChannelId?: string;
 };
 
 export function buildCreateTaskInput(draft: TaskDraft, config: AppConfig): CreateTaskInput {
   const schedule = buildSchedule(draft);
+  const kind = draft.kind ?? "prompt";
+  const prompt = draft.prompt || draft.workflowInput || "";
   return {
+    kind,
     name: draft.name,
-    prompt: draft.prompt,
+    prompt,
     model: draft.model?.trim() || config.model,
     schedule,
+    workflow:
+      kind === "workflow"
+        ? {
+            skill: draft.skill?.trim() || "literature-briefing",
+            input: draft.workflowInput?.trim() || draft.prompt
+          }
+        : undefined,
+    delivery: (draft.discordChannelId || process.env.DISCORD_DEFAULT_CHANNEL_ID)
+      ? {
+          discordChannelId: draft.discordChannelId || process.env.DISCORD_DEFAULT_CHANNEL_ID
+        }
+      : undefined,
     enabled: true
   };
 }

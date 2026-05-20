@@ -1,5 +1,8 @@
 node_modules/
 dist/
 .env
+default.env
 .DS_Store
 *.log
+workspace/*
+!workspace/.gitkeep

@@ -1,9 +1,12 @@
 #!/usr/bin/env node
+import { loadLocalEnv } from "./env.js";
 import { getConfigPath, loadConfig, saveConfig } from "./config.js";
 import { CodexCli } from "./codexCli.js";
+import { registerDiscordCommands, startDiscordBot } from "./connectors/discord/bot.js";
 import { startChat } from "./chatbot.js";
 import { formatRunList, formatTask, formatTaskList } from "./format.js";
 import { formatModels } from "./models.js";
+import { getLatestReport, listReports } from "./reports.js";
 import { startServer } from "./server/httpServer.js";
 import { buildCreateTaskInput, type TaskDraft } from "./taskInputs.js";
 import {
@@ -15,6 +18,8 @@ import {
   runTask,
   setTaskEnabled
 } from "./tasks/service.js";
+
+loadLocalEnv();
 
 async function main(): Promise<void> {
   const config = await loadConfig();
@@ -38,6 +43,12 @@ async function main(): Promise<void> {
       return;
     case "runs":
       await handleRuns(subcommand, args);
+      return;
+    case "reports":
+      await handleReports(subcommand, args);
+      return;
+    case "discord":
+      await handleDiscord(subcommand, config);
       return;
     case "config":
       await handleConfig(subcommand, args, config);
@@ -82,11 +93,15 @@ async function handleTasks(
       const input = buildCreateTaskInput(
         {
           name: requireFlag(flags, "name"),
-          prompt: requireFlag(flags, "prompt"),
+          prompt: flags.prompt ?? flags.input ?? "",
           model: flags.model,
           every: flags.every,
           cron: flags.cron,
-          timezone: flags.timezone
+          timezone: flags.timezone,
+          kind: flags.kind === "workflow" ? "workflow" : "prompt",
+          skill: flags.skill,
+          workflowInput: flags.input,
+          discordChannelId: flags["discord-channel"]
         },
         config
       );
@@ -127,6 +142,45 @@ async function handleTasks(
       throw new Error(
         "Usage: tasks add|list|remove|enable|disable|run-now. Try: tasks add --name demo --every 1h --prompt \"...\""
       );
+  }
+}
+
+async function handleReports(subcommand: string | undefined, args: string[]): Promise<void> {
+  switch (subcommand ?? "list") {
+    case "list": {
+      const flags = parseFlags(args);
+      const limit = flags.limit ? parsePort(flags.limit) : 20;
+      const reports = await listReports(limit);
+      console.log(
+        reports.length
+          ? reports.map((report) => `${report.mtime} ${report.id}\n  ${report.title}`).join("\n")
+          : "No reports found."
+      );
+      return;
+    }
+    case "latest": {
+      const report = await getLatestReport();
+      console.log(report ? report.content : "No reports found.");
+      return;
+    }
+    default:
+      throw new Error("Usage: reports list [--limit 20] | reports latest");
+  }
+}
+
+async function handleDiscord(
+  subcommand: string | undefined,
+  config: Awaited<ReturnType<typeof loadConfig>>
+): Promise<void> {
+  switch (subcommand) {
+    case "register-commands":
+      await registerDiscordCommands();
+      return;
+    case "start":
+      await startDiscordBot(config);
+      return;
+    default:
+      throw new Error("Usage: discord register-commands | discord start");
   }
 }
 
@@ -227,12 +281,17 @@ Usage:
   codex-bots chat
   codex-bots server start [--port 37371]
   codex-bots tasks add --name <name> --prompt <prompt> (--every <duration> | --cron <expr>) [--model <model>] [--timezone <tz>]
+  codex-bots tasks add --kind workflow --name <name> --input <input> --skill literature-briefing (--every <duration> | --cron <expr>) [--discord-channel <id>]
   codex-bots tasks list
   codex-bots tasks remove <id>
   codex-bots tasks enable <id>
   codex-bots tasks disable <id>
   codex-bots tasks run-now <id>
   codex-bots runs list [--task <id>] [--limit 20]
+  codex-bots reports list [--limit 20]
+  codex-bots reports latest
+  codex-bots discord register-commands
+  codex-bots discord start
   codex-bots models
   codex-bots config show
   codex-bots config set-model <model-id>
