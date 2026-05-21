@@ -7,6 +7,7 @@ import { CodexCli } from "./codexCli.js";
 import { formatRunList, formatTask, formatTaskList } from "./format.js";
 import { formatModels } from "./models.js";
 import { buildCreateTaskInput, defaultTimezone, type TaskDraft } from "./taskInputs.js";
+import { formatSchedule } from "./tasks/schedule.js";
 import { createTask, getTask, listTasks, removeTask, runTask } from "./tasks/service.js";
 
 export async function startChat(config: AppConfig): Promise<void> {
@@ -293,11 +294,7 @@ async function runScheduleWizard(config: AppConfig, rl: ReturnType<typeof create
   if (input.delivery?.discordChannelId) {
     console.log(`  discord channel: ${input.delivery.discordChannelId}`);
   }
-  console.log(
-    input.schedule.type === "interval"
-      ? `  schedule: every ${draft.every}`
-      : `  schedule: cron ${input.schedule.expression} (${input.schedule.timezone})`
-  );
+  console.log(`  schedule: ${formatSchedule(input.schedule)}`);
 
   const confirmation = await askChoice(rl, "Save this task? (yes/no)", ["yes", "no"]);
   if (confirmation === "yes") {

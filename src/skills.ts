@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const SKILLS_ROOT = join(process.cwd(), "skills");
@@ -12,6 +12,14 @@ export async function loadSkill(skillName: string): Promise<{ name: string; path
     path,
     instructions
   };
+}
+
+export async function listSkills(): Promise<string[]> {
+  const entries = await readdir(SKILLS_ROOT, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .map((entry) => entry.name.replace(/\.md$/i, ""))
+    .sort();
 }
 
 export function normalizeSkillName(skillName: string): string {

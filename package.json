@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
+    "dev:all": "tsx src/cli.ts start",
     "chat": "tsx src/cli.ts chat",
     "auth": "tsx src/cli.ts auth login",
     "discord": "tsx src/cli.ts discord start",

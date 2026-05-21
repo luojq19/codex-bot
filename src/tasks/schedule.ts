@@ -28,6 +28,9 @@ export function parseInterval(value: string): number {
 }
 
 export function formatSchedule(schedule: TaskSchedule): string {
+  if (schedule.type === "once") {
+    return `once at ${schedule.runAt}`;
+  }
   if (schedule.type === "interval") {
     return `every ${formatDuration(schedule.everyMs)}`;
   }
@@ -36,6 +39,9 @@ export function formatSchedule(schedule: TaskSchedule): string {
 }
 
 export function calculateNextRunAt(schedule: TaskSchedule, from = new Date()): string {
+  if (schedule.type === "once") {
+    return schedule.runAt;
+  }
   if (schedule.type === "interval") {
     return new Date(from.getTime() + schedule.everyMs).toISOString();
   }
@@ -48,6 +54,13 @@ export function calculateNextRunAt(schedule: TaskSchedule, from = new Date()): s
 }
 
 export function validateSchedule(schedule: TaskSchedule): void {
+  if (schedule.type === "once") {
+    const runAt = new Date(schedule.runAt);
+    if (Number.isNaN(runAt.getTime())) {
+      throw new Error("Once schedule requires a valid runAt timestamp.");
+    }
+    return;
+  }
   if (schedule.type === "interval") {
     if (!Number.isSafeInteger(schedule.everyMs) || schedule.everyMs <= 0) {
       throw new Error("Interval schedule requires a positive everyMs value.");

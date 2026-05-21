@@ -1,5 +1,9 @@
 export type TaskSchedule =
   | {
+      type: "once";
+      runAt: string;
+    }
+  | {
       type: "interval";
       everyMs: number;
     }

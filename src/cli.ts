@@ -7,7 +7,10 @@ import { startChat } from "./chatbot.js";
 import { formatRunList, formatTask, formatTaskList } from "./format.js";
 import { formatModels } from "./models.js";
 import { getLatestReport, listReports } from "./reports.js";
+import { startRuntime } from "./runtime.js";
 import { startServer } from "./server/httpServer.js";
+import { listSkills } from "./skills.js";
+import { runSkill } from "./skillsRuntime.js";
 import { buildCreateTaskInput, type TaskDraft } from "./taskInputs.js";
 import {
   createTask,
@@ -26,6 +29,9 @@ async function main(): Promise<void> {
   const [command, subcommand, ...args] = process.argv.slice(2);
 
   switch (command ?? "chat") {
+    case "start":
+      await handleStart(subcommand, args, config);
+      return;
     case "auth":
       await handleAuth(subcommand, config);
       return;
@@ -46,6 +52,9 @@ async function main(): Promise<void> {
       return;
     case "reports":
       await handleReports(subcommand, args);
+      return;
+    case "skills":
+      await handleSkills(subcommand, args, config);
       return;
     case "discord":
       await handleDiscord(subcommand, config);
@@ -74,12 +83,30 @@ async function handleServer(
     case "start": {
       const flags = parseFlags(args);
       const port = parsePort(flags.port ?? "37371");
-      await startServer(config, { port });
+      const server = await startServer(config, { port, host: flags.host });
+      await waitForSignal(async () => {
+        await server.stop();
+      });
       return;
     }
     default:
       throw new Error("Usage: server start [--port 37371]");
   }
+}
+
+async function handleStart(
+  subcommand: string | undefined,
+  args: string[],
+  config: Awaited<ReturnType<typeof loadConfig>>
+): Promise<void> {
+  const allArgs = subcommand ? [subcommand, ...args] : args;
+  const flags = parseFlags(allArgs);
+  await startRuntime(config, {
+    port: parsePort(flags.port ?? "37371"),
+    host: flags.host,
+    discord: flags["no-discord"] !== "true",
+    server: flags["no-server"] !== "true"
+  });
 }
 
 async function handleTasks(
@@ -95,7 +122,9 @@ async function handleTasks(
           name: requireFlag(flags, "name"),
           prompt: flags.prompt ?? flags.input ?? "",
           model: flags.model,
+          once: flags.once,
           every: flags.every,
+          daily: flags.daily,
           cron: flags.cron,
           timezone: flags.timezone,
           kind: flags.kind === "workflow" ? "workflow" : "prompt",
@@ -165,6 +194,36 @@ async function handleReports(subcommand: string | undefined, args: string[]): Pr
     }
     default:
       throw new Error("Usage: reports list [--limit 20] | reports latest");
+  }
+}
+
+async function handleSkills(
+  subcommand: string | undefined,
+  args: string[],
+  config: Awaited<ReturnType<typeof loadConfig>>
+): Promise<void> {
+  switch (subcommand ?? "list") {
+    case "list": {
+      const skills = await listSkills();
+      console.log(skills.length ? skills.join("\n") : "No skills found.");
+      return;
+    }
+    case "run": {
+      const skill = requireArg(args, "skills run <skill> --input <input>");
+      const flags = parseFlags(args.slice(1));
+      const input = requireNamedFlag(flags, "input");
+      const result = await runSkill(config, {
+        skill,
+        input,
+        model: flags.model,
+        name: flags.name
+      });
+      console.log(result.output);
+      console.log(`\nWorkspace: ${result.workspaceDir}`);
+      return;
+    }
+    default:
+      throw new Error("Usage: skills list | skills run <skill> --input <input> [--model <model>] [--name <name>]");
   }
 }
 
@@ -278,10 +337,11 @@ function printHelp(): void {
 Usage:
   codex-bots auth login
   codex-bots auth status
+  codex-bots start [--port 37371] [--host 127.0.0.1] [--no-discord] [--no-server]
   codex-bots chat
   codex-bots server start [--port 37371]
-  codex-bots tasks add --name <name> --prompt <prompt> (--every <duration> | --cron <expr>) [--model <model>] [--timezone <tz>]
-  codex-bots tasks add --kind workflow --name <name> --input <input> --skill literature-briefing (--every <duration> | --cron <expr>) [--discord-channel <id>]
+  codex-bots tasks add --name <name> --prompt <prompt> (--once <duration> | --every <duration> | --daily <HH:mm> | --cron <expr>) [--model <model>] [--timezone <tz>]
+  codex-bots tasks add --kind workflow --name <name> --input <input> --skill literature-briefing (--once <duration> | --every <duration> | --daily <HH:mm> | --cron <expr>) [--discord-channel <id>]
   codex-bots tasks list
   codex-bots tasks remove <id>
   codex-bots tasks enable <id>
@@ -290,6 +350,8 @@ Usage:
   codex-bots runs list [--task <id>] [--limit 20]
   codex-bots reports list [--limit 20]
   codex-bots reports latest
+  codex-bots skills list
+  codex-bots skills run <skill> --input <input> [--model <model>] [--name <name>]
   codex-bots discord register-commands
   codex-bots discord start
   codex-bots models
@@ -328,6 +390,14 @@ function requireFlag(flags: Record<string, string | undefined>, name: keyof Task
   return value;
 }
 
+function requireNamedFlag(flags: Record<string, string | undefined>, name: string): string {
+  const value = flags[name];
+  if (!value || value === "true") {
+    throw new Error(`Missing required flag --${name}.`);
+  }
+  return value;
+}
+
 function requireArg(args: string[], usage: string): string {
   const value = args[0];
   if (!value) {
@@ -342,6 +412,18 @@ function parsePort(value: string): number {
     throw new Error(`Invalid port or limit: ${value}`);
   }
   return parsed;
+}
+
+async function waitForSignal(onSignal: () => Promise<void>): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const shutdown = (): void => {
+      process.exitCode = 0;
+      resolve();
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
+  await onSignal();
 }
 
 main().catch((error: unknown) => {

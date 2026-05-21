@@ -5,7 +5,12 @@ import { createTask, getTask, listRuns, listTasks, removeTask } from "../tasks/s
 import type { CreateTaskInput } from "../tasks/types.js";
 import { TaskScheduler } from "./scheduler.js";
 
-export async function startServer(config: AppConfig, options: { port: number; host?: string }): Promise<void> {
+export type ServerHandle = {
+  url: string;
+  stop(): Promise<void>;
+};
+
+export async function startServer(config: AppConfig, options: { port: number; host?: string }): Promise<ServerHandle> {
   const host = options.host ?? "127.0.0.1";
   const scheduler = new TaskScheduler(config);
   scheduler.start();
@@ -29,16 +34,24 @@ export async function startServer(config: AppConfig, options: { port: number; ho
   });
 
   const address = server.address() as AddressInfo;
-  console.log(`codex-bots server listening on http://${address.address}:${address.port}`);
+  const url = `http://${address.address}:${address.port}`;
+  console.log(`codex-bots server listening on ${url}`);
 
-  const shutdown = (): void => {
-    scheduler.stop();
-    server.close(() => {
-      process.exit(0);
-    });
+  return {
+    url,
+    stop: async () => {
+      scheduler.stop();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
   };
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
 }
 
 async function handleRequest(

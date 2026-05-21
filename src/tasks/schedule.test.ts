@@ -45,7 +45,7 @@ test("buildCreateTaskInput requires exactly one schedule kind", () => {
         },
         config
       ),
-    /either --every or --cron/
+    /Use only one of --once, --every, --daily, or --cron/
   );
 });
 
@@ -61,6 +61,38 @@ test("buildCreateTaskInput defaults model from config", () => {
 
   assert.equal(input.model, DEFAULT_MODEL);
   assert.deepEqual(input.schedule, { type: "interval", everyMs: 60 * 60 * 1000 });
+});
+
+test("buildCreateTaskInput supports one-time delayed runs", () => {
+  const input = buildCreateTaskInput(
+    {
+      name: "once",
+      prompt: "hello",
+      once: "1m"
+    },
+    config
+  );
+
+  assert.equal(input.schedule.type, "once");
+  assert.ok(new Date(input.schedule.runAt).getTime() > Date.now());
+});
+
+test("buildCreateTaskInput supports daily HH:mm schedules", () => {
+  const input = buildCreateTaskInput(
+    {
+      name: "daily",
+      prompt: "hello",
+      daily: "08:30",
+      timezone: "America/New_York"
+    },
+    config
+  );
+
+  assert.deepEqual(input.schedule, {
+    type: "cron",
+    expression: "30 8 * * *",
+    timezone: "America/New_York"
+  });
 });
 
 test("buildCreateTaskInput supports workflow skills and Discord delivery", () => {

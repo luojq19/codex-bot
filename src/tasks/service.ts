@@ -83,6 +83,7 @@ export async function updateTaskNextRun(task: ScheduledTask, from = new Date()):
 
   const updated: ScheduledTask = {
     ...tasks[index],
+    enabled: tasks[index].schedule.type === "once" ? false : tasks[index].enabled,
     nextRunAt: calculateNextRunAt(tasks[index].schedule, from),
     updatedAt: new Date().toISOString()
   };
@@ -115,7 +116,11 @@ export async function runTask(task: ScheduledTask, config: AppConfig, options: R
     const result =
       task.kind === "workflow"
         ? await runSkillWorkflow(task, config, runId)
-        : { output: await codex.complete(task.model, task.prompt), workspaceDir: undefined, artifacts: undefined };
+        : {
+            output: await codex.complete(task.model, task.prompt),
+            workspaceDir: undefined,
+            artifacts: undefined
+          };
     await deliverTaskOutput(task, result.output);
     const record: TaskRunRecord = {
       runId,
@@ -194,7 +199,5 @@ async function deliverTaskOutput(task: ScheduledTask, output: string): Promise<v
 }
 
 function formatDiscordTaskMessage(task: ScheduledTask, output: string): string {
-  const title = `# ${task.name}\n`;
-  const body = output.length > 1800 ? `${output.slice(0, 1800)}\n\n...` : output;
-  return `${title}${body}`;
+  return [`# ${task.name}`, output].join("\n\n");
 }

@@ -7,6 +7,8 @@ export type TaskDraft = {
   prompt: string;
   model?: string;
   every?: string;
+  once?: string;
+  daily?: string;
   cron?: string;
   timezone?: string;
   kind?: "prompt" | "workflow";
@@ -47,18 +49,34 @@ export function defaultTimezone(): string {
 
 function buildSchedule(draft: TaskDraft): TaskSchedule {
   const every = draft.every?.trim();
+  const once = draft.once?.trim();
+  const daily = draft.daily?.trim();
   const cron = draft.cron?.trim();
+  const scheduleKinds = [every, once, daily, cron].filter(Boolean);
 
-  if (every && cron) {
-    throw new Error("Use either --every or --cron, not both.");
+  if (scheduleKinds.length > 1) {
+    throw new Error("Use only one of --once, --every, --daily, or --cron.");
   }
-  if (!every && !cron) {
-    throw new Error("Provide either --every <duration> or --cron <expression>.");
+  if (scheduleKinds.length === 0) {
+    throw new Error("Provide one of --once <duration>, --every <duration>, --daily <HH:mm>, or --cron <expression>.");
+  }
+  if (once) {
+    return {
+      type: "once",
+      runAt: new Date(Date.now() + parseInterval(once)).toISOString()
+    };
   }
   if (every) {
     return {
       type: "interval",
       everyMs: parseInterval(every)
+    };
+  }
+  if (daily) {
+    return {
+      type: "cron",
+      expression: dailyToCron(daily),
+      timezone: draft.timezone?.trim() || defaultTimezone()
     };
   }
 
@@ -67,4 +85,17 @@ function buildSchedule(draft: TaskDraft): TaskSchedule {
     expression: cron ?? "",
     timezone: draft.timezone?.trim() || defaultTimezone()
   };
+}
+
+function dailyToCron(value: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value);
+  if (!match) {
+    throw new Error("Daily time must use HH:mm, e.g. 08:00.");
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    throw new Error("Daily time must be a valid 24-hour time.");
+  }
+  return `${minute} ${hour} * * *`;
 }
