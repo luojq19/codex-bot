@@ -5,6 +5,14 @@ import type { AppConfig } from "./config.js";
 import { getConfigPath, saveConfig } from "./config.js";
 import { CodexCli } from "./codexCli.js";
 import { formatRunList, formatTask, formatTaskList } from "./format.js";
+import {
+  appendLongTermMemory,
+  formatMemorySearchResults,
+  readDailyMemory,
+  readLongTermMemory,
+  searchMemory,
+  summarizeDailyMemory
+} from "./memory/service.js";
 import { formatModels } from "./models.js";
 import { buildCreateTaskInput, defaultTimezone, type TaskDraft } from "./taskInputs.js";
 import { formatSchedule } from "./tasks/schedule.js";
@@ -33,7 +41,7 @@ export async function startChat(config: AppConfig): Promise<void> {
 
   console.log(`Codex chatbot ready. Model: ${config.model}`);
   console.log(`Web search: ${config.webSearchEnabled ? "on" : "off"}`);
-  console.log("Commands: /model <id>, /models, /search, /auth, /schedule, /clear, /help, /quit");
+  console.log("Commands: /model <id>, /models, /search, /auth, /memory, /schedule, /clear, /help, /quit");
 
   while (true) {
     const line = (await rl.question("\nYou> ")).trim();
@@ -59,7 +67,8 @@ export async function startChat(config: AppConfig): Promise<void> {
         source: "cli",
         text: line,
         history,
-        model: config.model
+        model: config.model,
+        conversationKey: "cli"
       });
       history = result.history;
       const response = result.response;
@@ -108,6 +117,9 @@ async function handleCommand(
       console.log(`Auth file path: ${status.authFilePath}`);
       return true;
     }
+    case "/memory":
+      await handleMemoryCommand(args, config);
+      return true;
     case "/clear":
       history.length = 0;
       console.log("Conversation cleared.");
@@ -116,7 +128,9 @@ async function handleCommand(
       await handleScheduleCommand(args, config, rl);
       return true;
     case "/help":
-      console.log("Commands: /model <id>, /models, /search on|off|status, /auth, /clear, /schedule, /help, /quit");
+      console.log(
+        "Commands: /model <id>, /models, /search on|off|status, /auth, /memory, /clear, /schedule, /help, /quit"
+      );
       console.log(`Config: ${getConfigPath()}`);
       return true;
     case "/quit":
@@ -125,6 +139,45 @@ async function handleCommand(
     default:
       console.log(`Unknown command: ${command}`);
       return true;
+  }
+}
+
+async function handleMemoryCommand(args: string[], config: AppConfig): Promise<void> {
+  const [subcommand = "show", ...rest] = args;
+
+  switch (subcommand) {
+    case "show":
+      console.log(await readLongTermMemory());
+      return;
+    case "add": {
+      const text = rest.join(" ").trim();
+      if (!text) {
+        console.log("Usage: /memory add <text>");
+        return;
+      }
+      await appendLongTermMemory(text, { source: "cli" });
+      console.log("Memory added.");
+      return;
+    }
+    case "search": {
+      const query = rest.join(" ").trim();
+      if (!query) {
+        console.log("Usage: /memory search <query>");
+        return;
+      }
+      console.log(formatMemorySearchResults(await searchMemory(query)));
+      return;
+    }
+    case "daily": {
+      console.log(await readDailyMemory(rest[0]));
+      return;
+    }
+    case "summarize": {
+      console.log(await summarizeDailyMemory(config, { date: rest[0] }));
+      return;
+    }
+    default:
+      console.log("Usage: /memory show | add <text> | search <query> | daily [YYYY-MM-DD] | summarize [YYYY-MM-DD]");
   }
 }
 

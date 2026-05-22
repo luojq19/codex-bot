@@ -5,6 +5,14 @@ import { CodexCli } from "./codexCli.js";
 import { registerDiscordCommands, startDiscordBot } from "./connectors/discord/bot.js";
 import { startChat } from "./chatbot.js";
 import { formatRunList, formatTask, formatTaskList } from "./format.js";
+import {
+  appendLongTermMemory,
+  formatMemorySearchResults,
+  readDailyMemory,
+  readLongTermMemory,
+  searchMemory,
+  summarizeDailyMemory
+} from "./memory/service.js";
 import { formatModels } from "./models.js";
 import { getLatestReport, listReports } from "./reports.js";
 import { startRuntime } from "./runtime.js";
@@ -52,6 +60,9 @@ async function main(): Promise<void> {
       return;
     case "reports":
       await handleReports(subcommand, args);
+      return;
+    case "memory":
+      await handleMemory(subcommand, args, config);
       return;
     case "skills":
       await handleSkills(subcommand, args, config);
@@ -194,6 +205,57 @@ async function handleReports(subcommand: string | undefined, args: string[]): Pr
     }
     default:
       throw new Error("Usage: reports list [--limit 20] | reports latest");
+  }
+}
+
+async function handleMemory(
+  subcommand: string | undefined,
+  args: string[],
+  config: Awaited<ReturnType<typeof loadConfig>>
+): Promise<void> {
+  switch (subcommand ?? "show") {
+    case "show":
+      console.log(await readLongTermMemory());
+      return;
+    case "add": {
+      const flags = parseFlags(args);
+      const text =
+        flags.text && flags.text !== "true" ? flags.text : args.filter((arg) => !arg.startsWith("--")).join(" ");
+      if (!text.trim()) {
+        throw new Error("Usage: memory add <text> or memory add --text <text>");
+      }
+      await appendLongTermMemory(text, { source: "cli" });
+      console.log("Memory added.");
+      return;
+    }
+    case "search": {
+      const flags = parseFlags(args);
+      const query =
+        flags.query && flags.query !== "true" ? flags.query : args.filter((arg) => !arg.startsWith("--")).join(" ");
+      if (!query.trim()) {
+        throw new Error("Usage: memory search <query> or memory search --query <query>");
+      }
+      console.log(formatMemorySearchResults(await searchMemory(query)));
+      return;
+    }
+    case "daily": {
+      const flags = parseFlags(args);
+      console.log(await readDailyMemory(flags.date ?? args.find((arg) => !arg.startsWith("--"))));
+      return;
+    }
+    case "summarize": {
+      const flags = parseFlags(args);
+      const write = flags.write === "true" || flags.write === "yes";
+      console.log(await summarizeDailyMemory(config, { date: flags.date, write }));
+      if (write) {
+        console.log("\nSummary appended to long-term memory.");
+      }
+      return;
+    }
+    default:
+      throw new Error(
+        "Usage: memory show | add <text> | search <query> | daily [--date YYYY-MM-DD] | summarize [--date YYYY-MM-DD] [--write]"
+      );
   }
 }
 
@@ -350,6 +412,11 @@ Usage:
   codex-bots runs list [--task <id>] [--limit 20]
   codex-bots reports list [--limit 20]
   codex-bots reports latest
+  codex-bots memory show
+  codex-bots memory add <text>
+  codex-bots memory search <query>
+  codex-bots memory daily [--date YYYY-MM-DD]
+  codex-bots memory summarize [--date YYYY-MM-DD] [--write]
   codex-bots skills list
   codex-bots skills run <skill> --input <input> [--model <model>] [--name <name>]
   codex-bots discord register-commands

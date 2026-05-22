@@ -45,6 +45,9 @@ Inside chat:
 /search off
 /search on
 /auth
+/memory show
+/memory add <text>
+/memory search <query>
 /schedule
 /schedule list
 /schedule remove <id>
@@ -114,6 +117,38 @@ workspace/<task-name>/<run-id>/
 
 Each workflow workspace includes `skill.md`, `input.md`, `prompt.md`, and `report.md`.
 
+## Memory
+
+The assistant keeps a simple file-first memory store under:
+
+```text
+~/.codex-bots/memory/
+```
+
+The long-term editable memory lives at:
+
+```text
+~/.codex-bots/memory/MEMORY.md
+```
+
+Daily chat notes are appended under:
+
+```text
+~/.codex-bots/memory/daily/YYYY-MM-DD.md
+```
+
+Before normal `/ask` or terminal chat responses, the assistant searches memory for relevant snippets and injects a compact recall section into the prompt. Skills and scheduled workflows remain separate from interactive chat memory.
+
+Manage memory from the CLI:
+
+```bash
+pnpm dev memory show
+pnpm dev memory add "User prefers concise Chinese replies."
+pnpm dev memory search "literature briefing"
+pnpm dev memory daily
+pnpm dev memory summarize --write
+```
+
 ## Discord
 
 Create a Discord application and bot, then put the credentials in `default.env` at the repo root:
@@ -149,6 +184,11 @@ Supported Discord commands:
 /schedule ask question:<text> once:1m
 /schedule skill skill:<skill-name> input:<input> every:1h
 /schedule skill skill:<skill-name> input:<input> daily:08:00
+/memory show
+/memory add text:<text>
+/memory search query:<query>
+/memory daily date:<YYYY-MM-DD>
+/memory summarize date:<YYYY-MM-DD>
 /reports latest
 /reports list
 /tasks list

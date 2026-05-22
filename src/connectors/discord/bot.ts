@@ -13,6 +13,14 @@ import { getLatestReport, listReports } from "../../reports.js";
 import { listSkills } from "../../skills.js";
 import { runSkill } from "../../skillsRuntime.js";
 import { formatRunList, formatTaskList } from "../../format.js";
+import {
+  appendLongTermMemory,
+  formatMemorySearchResults,
+  readDailyMemory,
+  readLongTermMemory,
+  searchMemory,
+  summarizeDailyMemory
+} from "../../memory/service.js";
 import { formatSchedule } from "../../tasks/schedule.js";
 import { createTask, getTask, listTasks, runTask } from "../../tasks/service.js";
 import { buildCreateTaskInput } from "../../taskInputs.js";
@@ -74,6 +82,34 @@ function buildCommands() {
       .setDescription("View generated workflow reports")
       .addSubcommand((subcommand) => subcommand.setName("latest").setDescription("Show the latest report"))
       .addSubcommand((subcommand) => subcommand.setName("list").setDescription("List recent reports")),
+    new SlashCommandBuilder()
+      .setName("memory")
+      .setDescription("Inspect and update assistant memory")
+      .addSubcommand((subcommand) => subcommand.setName("show").setDescription("Show long-term memory"))
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("add")
+          .setDescription("Add a long-term memory note")
+          .addStringOption((option) => option.setName("text").setDescription("Memory text").setRequired(true))
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("search")
+          .setDescription("Search assistant memory")
+          .addStringOption((option) => option.setName("query").setDescription("Search query").setRequired(true))
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("daily")
+          .setDescription("Show daily memory notes")
+          .addStringOption((option) => option.setName("date").setDescription("YYYY-MM-DD, defaults to today"))
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("summarize")
+          .setDescription("Summarize daily notes")
+          .addStringOption((option) => option.setName("date").setDescription("YYYY-MM-DD, defaults to today"))
+      ),
     new SlashCommandBuilder()
       .setName("tasks")
       .setDescription("Inspect or run scheduled tasks")
@@ -159,6 +195,9 @@ async function handleInteraction(interaction: ChatInputCommandInteraction, confi
       return;
     case "reports":
       await handleReports(interaction);
+      return;
+    case "memory":
+      await handleMemory(interaction, config);
       return;
     case "tasks":
       await handleTasks(interaction, config);
@@ -295,10 +334,47 @@ async function handleAsk(interaction: ChatInputCommandInteraction, config: AppCo
   const result = await handleUserMessage(config, {
     source: "discord",
     text: question,
-    history
+    history,
+    conversationKey: key
   });
   conversationHistory.set(key, result.history.slice(-12));
   await replyInChunks(interaction, result.response);
+}
+
+async function handleMemory(interaction: ChatInputCommandInteraction, config: AppConfig): Promise<void> {
+  const subcommand = interaction.options.getSubcommand();
+  await interaction.deferReply({ ephemeral: subcommand === "add" });
+
+  switch (subcommand) {
+    case "show":
+      await replyInChunks(interaction, await readLongTermMemory());
+      return;
+    case "add": {
+      const text = interaction.options.getString("text", true);
+      await appendLongTermMemory(text, {
+        source: `discord:${interaction.channelId}:${interaction.user.id}`
+      });
+      await interaction.editReply("Memory added.");
+      return;
+    }
+    case "search": {
+      const query = interaction.options.getString("query", true);
+      await replyInChunks(interaction, formatMemorySearchResults(await searchMemory(query)));
+      return;
+    }
+    case "daily": {
+      const date = interaction.options.getString("date") || undefined;
+      await replyInChunks(interaction, await readDailyMemory(date));
+      return;
+    }
+    case "summarize": {
+      const date = interaction.options.getString("date") || undefined;
+      await replyInChunks(interaction, await summarizeDailyMemory(config, { date }));
+      return;
+    }
+    default:
+      await interaction.editReply("Unknown memory command.");
+  }
 }
 
 async function handleReports(interaction: ChatInputCommandInteraction): Promise<void> {
