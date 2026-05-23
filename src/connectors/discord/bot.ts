@@ -1,14 +1,40 @@
 import {
+  ActionRowBuilder,
   AutocompleteInteraction,
   ChatInputCommandInteraction,
   Client,
   GatewayIntentBits,
   REST,
   Routes,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction
 } from "discord.js";
 import { handleUserMessage, type ConversationMessage } from "../../assistant/router.js";
 import type { AppConfig } from "../../config.js";
+import {
+  getCodexControlBinding,
+  removeCodexControlBinding,
+  saveCodexControlBinding
+} from "../../codexControl/bindings.js";
+import { isCodexControlAllowed, loadCodexControlConfig } from "../../codexControl/config.js";
+import {
+  cancelCodexControlRun,
+  getCodexControlStatus,
+  runCodexControlPrompt,
+  type CodexControlRunResult
+} from "../../codexControl/runner.js";
+import {
+  findCodexSession,
+  formatCodexHistory,
+  formatCodexSessions,
+  formatCodexUsage,
+  formatSessionChoiceName,
+  listCodexSessions,
+  loadLatestCodexUsage,
+  readCodexHistory,
+  type CodexSessionSummary
+} from "../../codexControl/sessions.js";
 import { getLatestReport, listReports } from "../../reports.js";
 import { listSkills } from "../../skills.js";
 import { runSkill } from "../../skillsRuntime.js";
@@ -60,6 +86,11 @@ export async function startDiscordBot(config: AppConfig): Promise<Client> {
   client.on("interactionCreate", (interaction) => {
     if (interaction.isAutocomplete()) {
       void handleAutocomplete(interaction);
+      return;
+    }
+
+    if (interaction.isStringSelectMenu()) {
+      void handleSelectMenu(interaction, config);
       return;
     }
 
@@ -120,6 +151,48 @@ function buildCommands() {
       .setDescription("Inspect or reset the persistent Codex thread for this chat")
       .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Show this chat's thread binding"))
       .addSubcommand((subcommand) => subcommand.setName("reset").setDescription("Start a fresh thread on the next ask")),
+    new SlashCommandBuilder()
+      .setName("codex")
+      .setDescription("Control local Codex CLI sessions")
+      .addSubcommand((subcommand) => subcommand.setName("sessions").setDescription("List recent Codex sessions"))
+      .addSubcommand((subcommand) => subcommand.setName("pick").setDescription("Pick a Codex session from a menu"))
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("bind")
+          .setDescription("Bind this chat to a Codex session")
+          .addStringOption((option) =>
+            option
+              .setName("session")
+              .setDescription("Codex session id")
+              .setRequired(true)
+              .setAutocomplete(true)
+          )
+      )
+      .addSubcommand((subcommand) => subcommand.setName("current").setDescription("Show the bound Codex session"))
+      .addSubcommand((subcommand) => subcommand.setName("detach").setDescription("Remove the Codex session binding"))
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("ask")
+          .setDescription("Send a prompt to the bound Codex session")
+          .addStringOption((option) => option.setName("prompt").setDescription("Prompt for Codex").setRequired(true))
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("new")
+          .setDescription("Start a new Codex session and bind it here")
+          .addStringOption((option) => option.setName("prompt").setDescription("First prompt").setRequired(true))
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("history")
+          .setDescription("Show recent messages from the bound Codex session")
+          .addIntegerOption((option) =>
+            option.setName("limit").setDescription("Messages to show, default 8").setMinValue(1).setMaxValue(20)
+          )
+      )
+      .addSubcommand((subcommand) => subcommand.setName("usage").setDescription("Show latest Codex usage data"))
+      .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Show active Codex run status"))
+      .addSubcommand((subcommand) => subcommand.setName("cancel").setDescription("Cancel the active Codex run")),
     new SlashCommandBuilder()
       .setName("tasks")
       .setDescription("Inspect or run scheduled tasks")
@@ -183,15 +256,34 @@ function buildCommands() {
 }
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
-  if (interaction.commandName !== "skill" && interaction.commandName !== "schedule") {
+  const focused = interaction.options.getFocused(true);
+
+  if (interaction.commandName === "codex" && focused.name === "session") {
+    const query = String(focused.value).toLowerCase();
+    const sessions = await listCodexSessions(25);
+    const choices = sessions
+      .filter((session) => {
+        const haystack = `${session.id} ${session.threadName} ${session.updatedAt}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .slice(0, 25)
+      .map((session) => ({ name: formatSessionChoiceName(session), value: session.id }));
+    await interaction.respond(choices);
+    return;
+  }
+
+  if (
+    (interaction.commandName !== "skill" && interaction.commandName !== "schedule") ||
+    focused.name !== "skill"
+  ) {
     await interaction.respond([]);
     return;
   }
 
-  const focused = interaction.options.getFocused().toLowerCase();
+  const query = String(focused.value).toLowerCase();
   const skills = await listSkills();
   const choices = skills
-    .filter((skill) => skill.toLowerCase().includes(focused))
+    .filter((skill) => skill.toLowerCase().includes(query))
     .slice(0, 25)
     .map((skill) => ({ name: skill, value: skill }));
 
@@ -211,6 +303,9 @@ async function handleInteraction(interaction: ChatInputCommandInteraction, confi
       return;
     case "thread":
       await handleThread(interaction);
+      return;
+    case "codex":
+      await handleCodex(interaction, config);
       return;
     case "tasks":
       await handleTasks(interaction, config);
@@ -370,6 +465,151 @@ async function handleThread(interaction: ChatInputCommandInteraction): Promise<v
   await interaction.editReply(binding ? formatThreadBinding(binding) : "No thread binding found yet.");
 }
 
+async function handleCodex(interaction: ChatInputCommandInteraction, config: AppConfig): Promise<void> {
+  const access = checkCodexControlAccess(interaction, config);
+  if (!access.allowed) {
+    await interaction.reply({ content: access.reason, ephemeral: true });
+    return;
+  }
+
+  const key = discordConversationKey(interaction);
+  const subcommand = interaction.options.getSubcommand();
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    switch (subcommand) {
+      case "sessions": {
+        const sessions = await listCodexSessions(10);
+        await interaction.editReply(formatCodexSessions(sessions));
+        return;
+      }
+      case "pick":
+        await handleCodexPick(interaction);
+        return;
+      case "bind": {
+        const requestedSession = interaction.options.getString("session", true).trim();
+        const session = await findCodexSession(requestedSession);
+        const sessionId = session?.id ?? requestedSession;
+        await saveCodexControlBinding(key, sessionId);
+        await interaction.editReply(formatCodexBoundSession(sessionId, session));
+        return;
+      }
+      case "current": {
+        const binding = await getCodexControlBinding(key);
+        if (!binding) {
+          await interaction.editReply("No Codex session is bound here. Use /codex pick or /codex bind.");
+          return;
+        }
+        const session = await findCodexSession(binding.sessionId);
+        await interaction.editReply(formatCodexBoundSession(binding.sessionId, session, binding.updatedAt));
+        return;
+      }
+      case "detach": {
+        const removed = await removeCodexControlBinding(key);
+        await interaction.editReply(
+          removed ? `Detached Codex session: ${removed.sessionId}` : "No Codex session binding found."
+        );
+        return;
+      }
+      case "ask": {
+        const prompt = interaction.options.getString("prompt", true);
+        const binding = await getRequiredCodexBinding(key);
+        const result = await runCodexControlPrompt({
+          appConfig: config,
+          conversationKey: key,
+          prompt,
+          sessionId: binding.sessionId
+        });
+        await replyInChunks(interaction, formatCodexRunResult(result), { ephemeral: true });
+        return;
+      }
+      case "new": {
+        const prompt = interaction.options.getString("prompt", true);
+        const result = await runCodexControlPrompt({
+          appConfig: config,
+          conversationKey: key,
+          forceNew: true,
+          prompt
+        });
+        await replyInChunks(interaction, formatCodexRunResult(result), { ephemeral: true });
+        return;
+      }
+      case "history": {
+        const binding = await getRequiredCodexBinding(key);
+        const limit = interaction.options.getInteger("limit") ?? 8;
+        await replyInChunks(interaction, formatCodexHistory(binding.sessionId, await readCodexHistory(binding.sessionId, limit)), {
+          ephemeral: true
+        });
+        return;
+      }
+      case "usage":
+        await interaction.editReply(formatCodexUsage(await loadLatestCodexUsage()));
+        return;
+      case "status":
+        await interaction.editReply(getCodexControlStatus(key));
+        return;
+      case "cancel":
+        await interaction.editReply(cancelCodexControlRun(key));
+        return;
+      default:
+        await interaction.editReply("Unknown Codex command.");
+    }
+  } catch (error) {
+    await interaction.editReply(`Codex control error: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function handleCodexPick(interaction: ChatInputCommandInteraction): Promise<void> {
+  const sessions = await listCodexSessions(25);
+  if (sessions.length === 0) {
+    await interaction.editReply("No Codex sessions found in ~/.codex/session_index.jsonl.");
+    return;
+  }
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(`codex-pick:${interaction.user.id}`)
+    .setPlaceholder("Choose a Codex session")
+    .addOptions(
+      sessions.map((session) => ({
+        label: formatSessionChoiceName(session),
+        value: session.id,
+        description: truncateDiscordOptionDescription(`${session.updatedAt} | ${session.id}`)
+      }))
+    );
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+
+  await interaction.editReply({
+    content: "Pick the Codex session to bind to this Discord conversation.",
+    components: [row]
+  });
+}
+
+async function handleSelectMenu(interaction: StringSelectMenuInteraction, config: AppConfig): Promise<void> {
+  if (!interaction.customId.startsWith("codex-pick:")) {
+    return;
+  }
+
+  const ownerId = interaction.customId.slice("codex-pick:".length);
+  if (ownerId !== interaction.user.id) {
+    await interaction.reply({ content: "This picker belongs to another user.", ephemeral: true });
+    return;
+  }
+
+  const access = checkCodexControlAccess(interaction, config);
+  if (!access.allowed) {
+    await interaction.reply({ content: access.reason, ephemeral: true });
+    return;
+  }
+
+  const sessionId = interaction.values[0];
+  const session = await findCodexSession(sessionId);
+  await saveCodexControlBinding(discordConversationKey(interaction), session?.id ?? sessionId);
+  await interaction.update({
+    content: formatCodexBoundSession(session?.id ?? sessionId, session),
+    components: []
+  });
+}
+
 async function handleMemory(interaction: ChatInputCommandInteraction, config: AppConfig): Promise<void> {
   const subcommand = interaction.options.getSubcommand();
   await interaction.deferReply({ ephemeral: subcommand === "add" });
@@ -445,16 +685,55 @@ async function handleTasks(interaction: ChatInputCommandInteraction, config: App
   await replyInChunks(interaction, formatRunList([record]));
 }
 
-async function replyInChunks(interaction: ChatInputCommandInteraction, content: string): Promise<void> {
+async function replyInChunks(
+  interaction: ChatInputCommandInteraction,
+  content: string,
+  options: { ephemeral?: boolean } = {}
+): Promise<void> {
   const chunks = chunkDiscordMessage(content);
   await interaction.editReply(chunks[0]);
   for (const chunk of chunks.slice(1)) {
-    await interaction.followUp(chunk);
+    await interaction.followUp({ content: chunk, ephemeral: options.ephemeral });
   }
 }
 
-function discordConversationKey(interaction: ChatInputCommandInteraction): string {
+function discordConversationKey(interaction: DiscordConversationInteraction): string {
   return `discord:${interaction.channelId}:${interaction.user.id}`;
+}
+
+type DiscordConversationInteraction = {
+  channelId: string;
+  user: { id: string };
+};
+
+type CodexControlAccess =
+  | { allowed: true }
+  | {
+      allowed: false;
+      reason: string;
+    };
+
+function checkCodexControlAccess(interaction: DiscordConversationInteraction, config: AppConfig): CodexControlAccess {
+  try {
+    const control = loadCodexControlConfig(config);
+    return isCodexControlAllowed(control, {
+      channelId: interaction.channelId,
+      userId: interaction.user.id
+    });
+  } catch (error) {
+    return {
+      allowed: false,
+      reason: `Codex control config error: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+}
+
+async function getRequiredCodexBinding(conversationKey: string) {
+  const binding = await getCodexControlBinding(conversationKey);
+  if (!binding) {
+    throw new Error("No Codex session is bound here. Use /codex pick, /codex bind, or /codex new first.");
+  }
+  return binding;
 }
 
 function formatThreadBinding(binding: ThreadBinding): string {
@@ -464,4 +743,47 @@ function formatThreadBinding(binding: ThreadBinding): string {
     `Model: ${binding.model}`,
     `Updated: ${binding.updatedAt}`
   ].join("\n");
+}
+
+function formatCodexBoundSession(
+  sessionId: string,
+  session?: CodexSessionSummary,
+  bindingUpdatedAt?: string
+): string {
+  return [
+    "Bound Codex session:",
+    sessionId,
+    session ? `Title: ${session.threadName}` : undefined,
+    session?.updatedAt ? `Session updated: ${session.updatedAt}` : undefined,
+    bindingUpdatedAt ? `Binding updated: ${bindingUpdatedAt}` : undefined,
+    "",
+    "Use /codex ask prompt:<text> to send a message to it."
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
+function formatCodexRunResult(result: CodexControlRunResult): string {
+  const status = result.cancelled
+    ? "Codex cancelled"
+    : result.timedOut
+      ? "Codex timed out"
+      : result.exitCode
+        ? `Codex finished with exit code ${result.exitCode}`
+        : "Codex finished";
+  return [
+    `${status}:`,
+    result.signal ? `Signal: ${result.signal}` : undefined,
+    result.sessionId ? `Session: ${result.sessionId}` : undefined,
+    result.resumed ? "Mode: resumed session" : "Mode: new session",
+    "",
+    result.output
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
+function truncateDiscordOptionDescription(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length <= 100 ? oneLine : `${oneLine.slice(0, 97).trimEnd()}...`;
 }

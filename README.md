@@ -184,9 +184,16 @@ DISCORD_BOT_TOKEN=...
 DISCORD_CLIENT_ID=...
 DISCORD_GUILD_ID=...              # recommended for fast slash-command registration
 DISCORD_DEFAULT_CHANNEL_ID=...    # optional default delivery target
+DISCORD_CODEX_CONTROL_USER_IDS=...       # Discord user ids allowed to control Codex sessions
+DISCORD_CODEX_CONTROL_CHANNEL_IDS=...    # optional channel ids allowed to use /codex
+CODEX_CONTROL_WORKDIR=/work/jiaqi/codex_bots
+CODEX_CONTROL_SANDBOX=workspace-write
+CODEX_CONTROL_EXTRA_PATH=/nethome/jluo380/.nvm/versions/node/v24.15.0/bin
 ```
 
 `default.env` is loaded automatically by the CLI and is ignored by git.
+Codex session control stays disabled until `DISCORD_CODEX_CONTROL_USER_IDS` or
+`DISCORD_CODEX_CONTROL_CHANNEL_IDS` is set.
 
 Register slash commands:
 
@@ -217,6 +224,17 @@ Supported Discord commands:
 /memory summarize date:<YYYY-MM-DD>
 /thread status
 /thread reset
+/codex sessions
+/codex pick
+/codex bind session:<session-id>
+/codex current
+/codex ask prompt:<text>
+/codex new prompt:<text>
+/codex history limit:<n>
+/codex usage
+/codex status
+/codex cancel
+/codex detach
 /reports latest
 /reports list
 /tasks list
@@ -228,6 +246,12 @@ The `skill` argument in `/skill run` supports Discord autocomplete, so available
 `/schedule` schedules an action rather than a specific feature: use `/schedule ask` for a plain assistant question and `/schedule skill` for a skill run. The `skill` argument in `/schedule skill` also supports autocomplete. Use exactly one of `once`, `every`, or `daily`: `once` runs one time after the delay, `every` repeats after each interval, and `daily` runs every day at `HH:mm`.
 
 The first MVP uses slash commands and bot replies. It does not require the privileged Message Content intent.
+
+`/ask` talks to this bot's assistant runtime and memory. `/codex` is separate: it
+controls local Codex CLI sessions from `~/.codex/session_index.jsonl` by running
+`codex exec` and `codex exec resume`. Use `/codex pick` for a selectable recent
+session list, or `/codex bind` with autocomplete. The chosen binding is stored in
+`~/.codex-bots/codex-control-bindings.json`.
 
 ## Web Search
 
