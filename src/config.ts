@@ -7,6 +7,7 @@ export type AppConfig = {
   codexCommand: string;
   model: string;
   webSearchEnabled: boolean;
+  chatRuntime: "thread" | "exec";
   execArgsTemplate: string[];
 };
 
@@ -29,6 +30,7 @@ const DEFAULT_CONFIG: AppConfig = {
   codexCommand: "codex",
   model: DEFAULT_MODEL,
   webSearchEnabled: true,
+  chatRuntime: "thread",
   execArgsTemplate: DEFAULT_EXEC_ARGS_TEMPLATE
 };
 
@@ -61,9 +63,10 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 function normalizeConfig(config: AppConfig): AppConfig {
-  const normalized = {
+  const normalized: AppConfig = {
     ...config,
-    webSearchEnabled: typeof config.webSearchEnabled === "boolean" ? config.webSearchEnabled : true
+    webSearchEnabled: typeof config.webSearchEnabled === "boolean" ? config.webSearchEnabled : true,
+    chatRuntime: config.chatRuntime === "exec" ? "exec" : "thread"
   };
 
   if (!Array.isArray(config.execArgsTemplate) || hasLegacyExecArgs(config.execArgsTemplate)) {

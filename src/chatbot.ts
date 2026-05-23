@@ -13,6 +13,7 @@ import {
   searchMemory,
   summarizeDailyMemory
 } from "./memory/service.js";
+import { getThreadBinding, removeThreadBinding } from "./llm/threadStore.js";
 import { formatModels } from "./models.js";
 import { buildCreateTaskInput, defaultTimezone, type TaskDraft } from "./taskInputs.js";
 import { formatSchedule } from "./tasks/schedule.js";
@@ -41,7 +42,7 @@ export async function startChat(config: AppConfig): Promise<void> {
 
   console.log(`Codex chatbot ready. Model: ${config.model}`);
   console.log(`Web search: ${config.webSearchEnabled ? "on" : "off"}`);
-  console.log("Commands: /model <id>, /models, /search, /auth, /memory, /schedule, /clear, /help, /quit");
+  console.log("Commands: /model <id>, /models, /search, /auth, /memory, /thread, /schedule, /clear, /help, /quit");
 
   while (true) {
     const line = (await rl.question("\nYou> ")).trim();
@@ -120,6 +121,9 @@ async function handleCommand(
     case "/memory":
       await handleMemoryCommand(args, config);
       return true;
+    case "/thread":
+      await handleThreadCommand(args);
+      return true;
     case "/clear":
       history.length = 0;
       console.log("Conversation cleared.");
@@ -129,7 +133,7 @@ async function handleCommand(
       return true;
     case "/help":
       console.log(
-        "Commands: /model <id>, /models, /search on|off|status, /auth, /memory, /clear, /schedule, /help, /quit"
+        "Commands: /model <id>, /models, /search on|off|status, /auth, /memory, /thread, /clear, /schedule, /help, /quit"
       );
       console.log(`Config: ${getConfigPath()}`);
       return true;
@@ -140,6 +144,32 @@ async function handleCommand(
       console.log(`Unknown command: ${command}`);
       return true;
   }
+}
+
+async function handleThreadCommand(args: string[]): Promise<void> {
+  const [subcommand = "status"] = args;
+  if (subcommand === "reset") {
+    const removed = await removeThreadBinding("cli");
+    console.log(removed ? `Thread reset: ${removed.threadId}` : "No thread binding found.");
+    return;
+  }
+
+  if (subcommand === "status") {
+    const binding = await getThreadBinding("cli");
+    console.log(
+      binding
+        ? [
+            `Conversation: ${binding.conversationKey}`,
+            `Thread: ${binding.threadId}`,
+            `Model: ${binding.model}`,
+            `Updated: ${binding.updatedAt}`
+          ].join("\n")
+        : "No thread binding found yet."
+    );
+    return;
+  }
+
+  console.log("Usage: /thread status | reset");
 }
 
 async function handleMemoryCommand(args: string[], config: AppConfig): Promise<void> {

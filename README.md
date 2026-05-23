@@ -48,6 +48,8 @@ Inside chat:
 /memory show
 /memory add <text>
 /memory search <query>
+/thread status
+/thread reset
 /schedule
 /schedule list
 /schedule remove <id>
@@ -139,6 +141,8 @@ Daily chat notes are appended under:
 
 Before normal `/ask` or terminal chat responses, the assistant searches memory for relevant snippets and injects a compact recall section into the prompt. Skills and scheduled workflows remain separate from interactive chat memory.
 
+Interactive chat uses a Codex app-server thread runtime by default. Thread state gives the current Discord or terminal conversation short-term continuity, while this memory layer remains the durable cross-session source of truth.
+
 Manage memory from the CLI:
 
 ```bash
@@ -148,6 +152,28 @@ pnpm dev memory search "literature briefing"
 pnpm dev memory daily
 pnpm dev memory summarize --write
 ```
+
+## Chat Threads
+
+Interactive `/ask` conversations use Codex's experimental `app-server` thread APIs when available. The app persists conversation bindings in:
+
+```text
+~/.codex-bots/threads.json
+```
+
+The thread runtime is only used for normal chat. Skills and scheduled workflow runs still use isolated one-shot Codex execution so they do not pollute an interactive conversation thread.
+
+Manage thread bindings:
+
+```bash
+pnpm dev threads list
+pnpm dev threads status cli
+pnpm dev threads reset cli
+pnpm dev config set-chat-runtime thread
+pnpm dev config set-chat-runtime exec
+```
+
+If the thread runtime fails, chat falls back to the existing `codex exec` path for that turn.
 
 ## Discord
 
@@ -189,6 +215,8 @@ Supported Discord commands:
 /memory search query:<query>
 /memory daily date:<YYYY-MM-DD>
 /memory summarize date:<YYYY-MM-DD>
+/thread status
+/thread reset
 /reports latest
 /reports list
 /tasks list
@@ -233,7 +261,8 @@ GET    /runs?taskId=&limit=
 
 ## Notes
 
-- The chatbot calls `codex --ask-for-approval never --search exec --sandbox read-only -m <model> <prompt>` by default.
-- It uses `--output-last-message` internally so only the final assistant response is shown.
-- Conversation history is maintained by this app and included in each prompt.
+- Interactive chat uses `codex --search app-server --listen stdio://` by default and stores Codex thread bindings locally.
+- If `chatRuntime` is set to `exec` or app-server fails, the chatbot falls back to `codex --ask-for-approval never --search exec --sandbox read-only -m <model> <prompt>`.
+- The exec fallback uses `--output-last-message` internally so only the final assistant response is shown.
+- Conversation history is maintained by this app for exec fallback; app-server threads carry their own short-term context.
 - Available subscription models can vary by account and Codex CLI version. Use `/model <id>` to try a custom model.

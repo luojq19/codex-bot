@@ -13,6 +13,12 @@ import {
   searchMemory,
   summarizeDailyMemory
 } from "./memory/service.js";
+import {
+  getThreadBinding,
+  listThreadBindings,
+  removeThreadBinding,
+  type ThreadBinding
+} from "./llm/threadStore.js";
 import { formatModels } from "./models.js";
 import { getLatestReport, listReports } from "./reports.js";
 import { startRuntime } from "./runtime.js";
@@ -63,6 +69,10 @@ async function main(): Promise<void> {
       return;
     case "memory":
       await handleMemory(subcommand, args, config);
+      return;
+    case "threads":
+    case "thread":
+      await handleThreads(subcommand, args);
       return;
     case "skills":
       await handleSkills(subcommand, args, config);
@@ -259,6 +269,30 @@ async function handleMemory(
   }
 }
 
+async function handleThreads(subcommand: string | undefined, args: string[]): Promise<void> {
+  switch (subcommand ?? "list") {
+    case "list": {
+      const bindings = await listThreadBindings();
+      console.log(bindings.length ? bindings.map(formatThreadBinding).join("\n\n") : "No thread bindings found.");
+      return;
+    }
+    case "status": {
+      const key = args[0] ?? "cli";
+      const binding = await getThreadBinding(key);
+      console.log(binding ? formatThreadBinding(binding) : `No thread binding found for ${key}.`);
+      return;
+    }
+    case "reset": {
+      const key = args[0] ?? "cli";
+      const binding = await removeThreadBinding(key);
+      console.log(binding ? `Thread reset: ${binding.threadId}` : `No thread binding found for ${key}.`);
+      return;
+    }
+    default:
+      throw new Error("Usage: threads list | threads status [conversationKey] | threads reset [conversationKey]");
+  }
+}
+
 async function handleSkills(
   subcommand: string | undefined,
   args: string[],
@@ -387,6 +421,16 @@ async function handleConfig(
       console.log(`Web search ${config.webSearchEnabled ? "enabled" : "disabled"}`);
       return;
     }
+    case "set-chat-runtime": {
+      const value = args[0];
+      if (value !== "thread" && value !== "exec") {
+        throw new Error("Usage: config set-chat-runtime thread|exec");
+      }
+      config.chatRuntime = value;
+      await saveConfig(config);
+      console.log(`Chat runtime set to ${value}`);
+      return;
+    }
     default:
       console.error(`Unknown config command: ${subcommand}`);
       process.exitCode = 1;
@@ -417,6 +461,9 @@ Usage:
   codex-bots memory search <query>
   codex-bots memory daily [--date YYYY-MM-DD]
   codex-bots memory summarize [--date YYYY-MM-DD] [--write]
+  codex-bots threads list
+  codex-bots threads status [conversationKey]
+  codex-bots threads reset [conversationKey]
   codex-bots skills list
   codex-bots skills run <skill> --input <input> [--model <model>] [--name <name>]
   codex-bots discord register-commands
@@ -426,7 +473,17 @@ Usage:
   codex-bots config set-model <model-id>
   codex-bots config set-codex-command <command>
   codex-bots config set-web-search on|off
+  codex-bots config set-chat-runtime thread|exec
 `);
+}
+
+function formatThreadBinding(binding: ThreadBinding): string {
+  return [
+    `Conversation: ${binding.conversationKey}`,
+    `Thread: ${binding.threadId}`,
+    `Model: ${binding.model}`,
+    `Updated: ${binding.updatedAt}`
+  ].join("\n");
 }
 
 function parseFlags(args: string[]): Record<string, string | undefined> {

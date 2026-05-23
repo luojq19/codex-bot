@@ -1,5 +1,5 @@
 import type { AppConfig } from "../config.js";
-import { CodexCli } from "../codexCli.js";
+import { createExecRuntime, getThreadRuntime } from "../llm/runtime.js";
 import { appendDailyTurn, buildMemoryRecallContext } from "../memory/service.js";
 
 export type ConversationSource = "cli" | "discord";
@@ -24,9 +24,13 @@ export async function handleUserMessage(
 ): Promise<{ response: string; history: ConversationMessage[] }> {
   const model = input.model ?? config.model;
   const history = [...input.history, { role: "user" as const, content: input.text }];
-  const codex = new CodexCli(config);
   const context = await buildContext(input.text, input.context);
-  const response = await codex.complete(model, buildPrompt(input.source, history, context));
+  const response = await completeWithRuntime(config, {
+    ...input,
+    model,
+    history,
+    context
+  });
 
   await appendDailyTurn({
     source: input.source,
@@ -43,6 +47,34 @@ export async function handleUserMessage(
   };
 }
 
+async function completeWithRuntime(
+  config: AppConfig,
+  input: HandleUserMessageInput & { model: string; history: ConversationMessage[]; context?: string }
+): Promise<string> {
+  const execRuntime = createExecRuntime(config);
+  if (config.chatRuntime !== "thread" || !input.conversationKey) {
+    return execRuntime.complete({
+      model: input.model,
+      prompt: buildExecPrompt(input.source, input.history, input.context)
+    });
+  }
+
+  try {
+    return await getThreadRuntime(config).complete({
+      model: input.model,
+      conversationKey: input.conversationKey,
+      source: input.source,
+      prompt: buildThreadTurnPrompt(input.text, input.context)
+    });
+  } catch (error) {
+    console.warn(`Codex thread runtime failed; falling back to codex exec: ${formatError(error)}`);
+    return execRuntime.complete({
+      model: input.model,
+      prompt: buildExecPrompt(input.source, input.history, input.context)
+    });
+  }
+}
+
 async function buildContext(text: string, context: string | undefined): Promise<string | undefined> {
   const memoryContext = await buildMemoryRecallContext(text).catch((error: unknown) => {
     console.warn(`Memory recall failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -52,7 +84,7 @@ async function buildContext(text: string, context: string | undefined): Promise<
   return parts.length ? parts.join("\n\n") : undefined;
 }
 
-function buildPrompt(source: ConversationSource, history: ConversationMessage[], context: string | undefined): string {
+function buildExecPrompt(source: ConversationSource, history: ConversationMessage[], context: string | undefined): string {
   const transcript = history
     .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
     .join("\n\n");
@@ -71,4 +103,17 @@ function buildPrompt(source: ConversationSource, history: ConversationMessage[],
     "",
     "Assistant:"
   ].join("\n");
+}
+
+function buildThreadTurnPrompt(text: string, context: string | undefined): string {
+  return [
+    context ? `Additional context:\n${context}` : "",
+    "",
+    "User message:",
+    text
+  ].join("\n");
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

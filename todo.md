@@ -1,6 +1,6 @@
 # Todo
 
-- [ ] Implement a Codex app-server thread runtime for persistent Discord conversations.
+- [x] Implement a Codex app-server thread runtime for persistent Discord conversations.
 
 # Details
 

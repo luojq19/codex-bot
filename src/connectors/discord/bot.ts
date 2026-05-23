@@ -21,6 +21,11 @@ import {
   searchMemory,
   summarizeDailyMemory
 } from "../../memory/service.js";
+import {
+  getThreadBinding,
+  removeThreadBinding,
+  type ThreadBinding
+} from "../../llm/threadStore.js";
 import { formatSchedule } from "../../tasks/schedule.js";
 import { createTask, getTask, listTasks, runTask } from "../../tasks/service.js";
 import { buildCreateTaskInput } from "../../taskInputs.js";
@@ -111,6 +116,11 @@ function buildCommands() {
           .addStringOption((option) => option.setName("date").setDescription("YYYY-MM-DD, defaults to today"))
       ),
     new SlashCommandBuilder()
+      .setName("thread")
+      .setDescription("Inspect or reset the persistent Codex thread for this chat")
+      .addSubcommand((subcommand) => subcommand.setName("status").setDescription("Show this chat's thread binding"))
+      .addSubcommand((subcommand) => subcommand.setName("reset").setDescription("Start a fresh thread on the next ask")),
+    new SlashCommandBuilder()
       .setName("tasks")
       .setDescription("Inspect or run scheduled tasks")
       .addSubcommand((subcommand) => subcommand.setName("list").setDescription("List scheduled tasks"))
@@ -198,6 +208,9 @@ async function handleInteraction(interaction: ChatInputCommandInteraction, confi
       return;
     case "memory":
       await handleMemory(interaction, config);
+      return;
+    case "thread":
+      await handleThread(interaction);
       return;
     case "tasks":
       await handleTasks(interaction, config);
@@ -327,7 +340,7 @@ function formatSkillResultMessage(result: Awaited<ReturnType<typeof runSkill>>):
 
 async function handleAsk(interaction: ChatInputCommandInteraction, config: AppConfig): Promise<void> {
   const question = interaction.options.getString("question", true);
-  const key = `${interaction.channelId}:${interaction.user.id}`;
+  const key = discordConversationKey(interaction);
   const history = conversationHistory.get(key) ?? [];
 
   await interaction.deferReply();
@@ -339,6 +352,22 @@ async function handleAsk(interaction: ChatInputCommandInteraction, config: AppCo
   });
   conversationHistory.set(key, result.history.slice(-12));
   await replyInChunks(interaction, result.response);
+}
+
+async function handleThread(interaction: ChatInputCommandInteraction): Promise<void> {
+  const key = discordConversationKey(interaction);
+  const subcommand = interaction.options.getSubcommand();
+  await interaction.deferReply({ ephemeral: true });
+
+  if (subcommand === "reset") {
+    const removed = await removeThreadBinding(key);
+    conversationHistory.delete(key);
+    await interaction.editReply(removed ? `Thread reset: ${removed.threadId}` : "No thread binding found.");
+    return;
+  }
+
+  const binding = await getThreadBinding(key);
+  await interaction.editReply(binding ? formatThreadBinding(binding) : "No thread binding found yet.");
 }
 
 async function handleMemory(interaction: ChatInputCommandInteraction, config: AppConfig): Promise<void> {
@@ -422,4 +451,17 @@ async function replyInChunks(interaction: ChatInputCommandInteraction, content: 
   for (const chunk of chunks.slice(1)) {
     await interaction.followUp(chunk);
   }
+}
+
+function discordConversationKey(interaction: ChatInputCommandInteraction): string {
+  return `discord:${interaction.channelId}:${interaction.user.id}`;
+}
+
+function formatThreadBinding(binding: ThreadBinding): string {
+  return [
+    `Conversation: ${binding.conversationKey}`,
+    `Thread: ${binding.threadId}`,
+    `Model: ${binding.model}`,
+    `Updated: ${binding.updatedAt}`
+  ].join("\n");
 }
