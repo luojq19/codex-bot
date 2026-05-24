@@ -82,7 +82,9 @@ Run a skill directly without creating a scheduled task:
 
 ```bash
 pnpm dev skills list
+pnpm dev skills run paper-discovery --input "Find recent papers on AI research agents."
 pnpm dev skills run literature-briefing --input "Track new AI agent papers from the last week."
+pnpm dev skills run deep-research --input "Survey recent AI research agent papers."
 ```
 
 Create a skill-based workflow task that writes a report into `workspace/` and posts the report to your default Discord channel:
@@ -118,6 +120,7 @@ workspace/<task-name>/<run-id>/
 ```
 
 Each workflow workspace includes `skill.md`, `input.md`, `prompt.md`, and `report.md`.
+Composed research skills may also include upstream artifacts such as `paper_discovery.md`.
 
 ## Memory
 
@@ -241,7 +244,7 @@ Supported Discord commands:
 /tasks run-now id:<task-id>
 ```
 
-`/research` is a shortcut for running the `literature-briefing` skill immediately. Scheduled tasks can also run skills, but skills are not tied to scheduling.
+`/research` is a shortcut for running the `literature-briefing` skill immediately. `literature-briefing` and `deep-research` first run `paper-discovery` in the same workspace, then consume the generated paper list. Scheduled tasks can also run skills, but skills are not tied to scheduling.
 The `skill` argument in `/skill run` supports Discord autocomplete, so available skills appear as selectable suggestions.
 `/schedule` schedules an action rather than a specific feature: use `/schedule ask` for a plain assistant question and `/schedule skill` for a skill run. The `skill` argument in `/schedule skill` also supports autocomplete. Use exactly one of `once`, `every`, or `daily`: `once` runs one time after the delay, `every` repeats after each interval, and `daily` runs every day at `HH:mm`.
 

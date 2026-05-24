@@ -3,6 +3,7 @@ import {
   AutocompleteInteraction,
   ChatInputCommandInteraction,
   Client,
+  Events,
   GatewayIntentBits,
   REST,
   Routes,
@@ -79,7 +80,7 @@ export async function startDiscordBot(config: AppConfig): Promise<Client> {
   const env = loadDiscordEnv();
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-  client.once("ready", () => {
+  client.once(Events.ClientReady, () => {
     console.log(`Discord bot logged in as ${client.user?.tag ?? "unknown"}.`);
   });
 
