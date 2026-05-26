@@ -44,13 +44,7 @@ export class CodexThreadRuntime implements LLMRuntime {
           "turn/start",
           {
             threadId,
-            input: [
-              {
-                type: "text",
-                text: input.prompt,
-                text_elements: []
-              }
-            ],
+            input: buildTurnInput(input.prompt, input.imagePaths),
             cwd: input.options?.cwd ?? processCwd(),
             model: input.model,
             approvalPolicy: "never",
@@ -132,6 +126,20 @@ export class CodexThreadRuntime implements LLMRuntime {
       { timeoutMs: 120_000 }
     );
   }
+}
+
+function buildTurnInput(prompt: string, imagePaths: string[] = []): JsonValue[] {
+  return [
+    {
+      type: "text",
+      text: prompt,
+      text_elements: []
+    },
+    ...imagePaths.map((path) => ({
+      type: "localImage",
+      path
+    }))
+  ];
 }
 
 function buildDeveloperInstructions(source: "cli" | "discord"): string {

@@ -210,10 +210,20 @@ Start the Discord bot:
 pnpm dev discord start
 ```
 
+Normal assistant chat can use a mention in any channel where the bot can read and send messages:
+
+```text
+@J.A.R.V.I.S. 你是谁？
+@J.A.R.V.I.S. 帮我看这张图
+```
+
+Mention chat requires the Discord Developer Portal `Message Content Intent`. Mention chat and `/ask`
+share the same per-channel, per-user conversation thread and memory path.
+
 Supported Discord commands:
 
 ```text
-/ask question:<text>
+/ask question:<text> image1:<file> ... image20:<file>
 /skill list
 /skill run skill:<skill-name> input:<input>
 /research topic:<topic>
@@ -231,8 +241,8 @@ Supported Discord commands:
 /codex pick
 /codex bind session:<session-id>
 /codex current
-/codex ask prompt:<text>
-/codex new prompt:<text>
+/codex ask prompt:<text> image1:<file> ... image20:<file>
+/codex new prompt:<text> image1:<file> ... image20:<file>
 /codex history limit:<n>
 /codex usage
 /codex status
@@ -247,8 +257,7 @@ Supported Discord commands:
 `/research` is a shortcut for running the `literature-briefing` skill immediately. `literature-briefing` and `deep-research` first run `paper-discovery` in the same workspace, then consume the generated paper list. Scheduled tasks can also run skills, but skills are not tied to scheduling.
 The `skill` argument in `/skill run` supports Discord autocomplete, so available skills appear as selectable suggestions.
 `/schedule` schedules an action rather than a specific feature: use `/schedule ask` for a plain assistant question and `/schedule skill` for a skill run. The `skill` argument in `/schedule skill` also supports autocomplete. Use exactly one of `once`, `every`, or `daily`: `once` runs one time after the delay, `every` repeats after each interval, and `daily` runs every day at `HH:mm`.
-
-The first MVP uses slash commands and bot replies. It does not require the privileged Message Content intent.
+`/ask`, `/codex ask`, and `/codex new` accept optional image attachments through `image1` to `image20`. Mention chat accepts normal Discord message attachments. `/ask` and mention chat keep image turns in the persistent Codex app-server thread, so follow-up questions share the same short-term conversation context. `/codex ask` and `/codex new` use Codex CLI's `--image` support because they intentionally control local Codex CLI sessions.
 
 `/ask` talks to this bot's assistant runtime and memory. `/codex` is separate: it
 controls local Codex CLI sessions from `~/.codex/session_index.jsonl` by running

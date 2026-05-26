@@ -10,6 +10,9 @@ export class CodexExecRuntime implements LLMRuntime {
   }
 
   complete(input: RuntimeCompletionInput): Promise<string> {
-    return this.codex.complete(input.model, input.prompt, input.options);
+    return this.codex.complete(input.model, input.prompt, {
+      ...input.options,
+      imagePaths: input.imagePaths ?? input.options?.imagePaths
+    });
   }
 }

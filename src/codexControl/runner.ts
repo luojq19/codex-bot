@@ -11,6 +11,7 @@ export type CodexControlRunInput = {
   appConfig: AppConfig;
   conversationKey: string;
   prompt: string;
+  imagePaths?: string[];
   sessionId?: string;
   forceNew?: boolean;
 };
@@ -81,6 +82,7 @@ export async function runCodexControlPrompt(input: CodexControlRunInput): Promis
   const outputPath = join(outputDir, "last-message.txt");
   const args = buildCodexArgs(control, {
     forceNew: input.forceNew,
+    imagePaths: input.imagePaths,
     outputPath,
     prompt: input.prompt,
     sessionId: input.sessionId
@@ -133,6 +135,7 @@ function buildCodexArgs(
   control: CodexControlConfig,
   input: {
     forceNew?: boolean;
+    imagePaths?: string[];
     outputPath: string;
     prompt: string;
     sessionId?: string;
@@ -151,6 +154,7 @@ function buildCodexArgs(
       "resume",
       "--skip-git-repo-check",
       "--json",
+      ...(input.imagePaths ?? []).flatMap((path) => ["--image", path]),
       "--output-last-message",
       input.outputPath,
       input.sessionId,
@@ -168,6 +172,7 @@ function buildCodexArgs(
     "--color",
     "never",
     "--json",
+    ...(input.imagePaths ?? []).flatMap((path) => ["--image", path]),
     "--output-last-message",
     input.outputPath,
     input.prompt

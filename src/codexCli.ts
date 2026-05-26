@@ -20,6 +20,7 @@ export type CodexCompleteOptions = {
   cwd?: string;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   webSearchEnabled?: boolean;
+  imagePaths?: string[];
 };
 
 export class CodexCli {
@@ -78,7 +79,14 @@ export class CodexCli {
     const args = buildExecArgs(this.config, model, options);
 
     try {
-      const result = await runCommand(this.config.codexCommand, [...args, "--output-last-message", outputPath, prompt]);
+      const imageArgs = (options.imagePaths ?? []).flatMap((path) => ["--image", path]);
+      const result = await runCommand(this.config.codexCommand, [
+        ...args,
+        ...imageArgs,
+        "--output-last-message",
+        outputPath,
+        prompt
+      ]);
 
       if (result.code !== 0) {
         const stderr = cleanCodexOutput(result.stderr);

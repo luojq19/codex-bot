@@ -5,6 +5,7 @@ import {
   Client,
   Events,
   GatewayIntentBits,
+  Message,
   REST,
   Routes,
   SlashCommandBuilder,
@@ -56,6 +57,7 @@ import {
 import { formatSchedule } from "../../tasks/schedule.js";
 import { createTask, getTask, listTasks, runTask } from "../../tasks/service.js";
 import { buildCreateTaskInput } from "../../taskInputs.js";
+import { addImageAttachmentOptions, downloadImageAttachments, downloadMessageImageAttachments } from "./attachments.js";
 import { chunkDiscordMessage } from "./delivery.js";
 import { loadDiscordEnv } from "./config.js";
 
@@ -78,7 +80,9 @@ export async function registerDiscordCommands(): Promise<void> {
 
 export async function startDiscordBot(config: AppConfig): Promise<Client> {
   const env = loadDiscordEnv();
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  });
 
   client.once(Events.ClientReady, () => {
     console.log(`Discord bot logged in as ${client.user?.tag ?? "unknown"}.`);
@@ -102,18 +106,24 @@ export async function startDiscordBot(config: AppConfig): Promise<Client> {
     void handleInteraction(interaction, config);
   });
 
+  client.on(Events.MessageCreate, (message) => {
+    void handleMentionMessage(message, config);
+  });
+
   await client.login(env.token);
   return client;
 }
 
 function buildCommands() {
   return [
-    new SlashCommandBuilder()
-      .setName("ask")
-      .setDescription("Ask the assistant a question")
-      .addStringOption((option) =>
-        option.setName("question").setDescription("Question to ask the assistant").setRequired(true)
-      ),
+    addImageAttachmentOptions(
+      new SlashCommandBuilder()
+        .setName("ask")
+        .setDescription("Ask the assistant a question")
+        .addStringOption((option) =>
+          option.setName("question").setDescription("Question to ask the assistant").setRequired(true)
+        )
+    ),
     new SlashCommandBuilder()
       .setName("reports")
       .setDescription("View generated workflow reports")
@@ -172,16 +182,20 @@ function buildCommands() {
       .addSubcommand((subcommand) => subcommand.setName("current").setDescription("Show the bound Codex session"))
       .addSubcommand((subcommand) => subcommand.setName("detach").setDescription("Remove the Codex session binding"))
       .addSubcommand((subcommand) =>
-        subcommand
-          .setName("ask")
-          .setDescription("Send a prompt to the bound Codex session")
-          .addStringOption((option) => option.setName("prompt").setDescription("Prompt for Codex").setRequired(true))
+        addImageAttachmentOptions(
+          subcommand
+            .setName("ask")
+            .setDescription("Send a prompt to the bound Codex session")
+            .addStringOption((option) => option.setName("prompt").setDescription("Prompt for Codex").setRequired(true))
+        )
       )
       .addSubcommand((subcommand) =>
-        subcommand
-          .setName("new")
-          .setDescription("Start a new Codex session and bind it here")
-          .addStringOption((option) => option.setName("prompt").setDescription("First prompt").setRequired(true))
+        addImageAttachmentOptions(
+          subcommand
+            .setName("new")
+            .setDescription("Start a new Codex session and bind it here")
+            .addStringOption((option) => option.setName("prompt").setDescription("First prompt").setRequired(true))
+        )
       )
       .addSubcommand((subcommand) =>
         subcommand
@@ -440,14 +454,82 @@ async function handleAsk(interaction: ChatInputCommandInteraction, config: AppCo
   const history = conversationHistory.get(key) ?? [];
 
   await interaction.deferReply();
-  const result = await handleUserMessage(config, {
-    source: "discord",
-    text: question,
-    history,
-    conversationKey: key
-  });
-  conversationHistory.set(key, result.history.slice(-12));
-  await replyInChunks(interaction, result.response);
+  let images;
+  try {
+    images = await downloadImageAttachments(interaction);
+    const result = await handleUserMessage(config, {
+      source: "discord",
+      text: question,
+      imagePaths: images.paths,
+      history,
+      conversationKey: key
+    });
+    conversationHistory.set(key, result.history.slice(-12));
+    await replyInChunks(interaction, result.response);
+  } catch (error) {
+    await interaction.editReply(`Ask error: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    await images?.cleanup();
+  }
+}
+
+async function handleMentionMessage(message: Message, config: AppConfig): Promise<void> {
+  if (message.author.bot) {
+    return;
+  }
+
+  const botUser = message.client.user;
+  if (!botUser || !message.mentions.users.has(botUser.id)) {
+    return;
+  }
+  if (!isSendableMessageChannel(message.channel)) {
+    return;
+  }
+
+  const key = discordConversationKey({ channelId: message.channelId, user: { id: message.author.id } });
+  const history = conversationHistory.get(key) ?? [];
+  let images;
+  let typingInterval: ReturnType<typeof setInterval> | undefined;
+
+  try {
+    images = await downloadMessageImageAttachments(message);
+    const text = stripBotMention(message.content, botUser.id).trim() || defaultMentionPrompt(images.paths.length);
+    if (!text) {
+      await message.reply({
+        content: "Mention me with a message or attach an image.",
+        allowedMentions: { repliedUser: false }
+      });
+      return;
+    }
+
+    await sendTyping(message.channel);
+    typingInterval = setInterval(() => {
+      void sendTyping(message.channel);
+    }, 8_000);
+    typingInterval.unref?.();
+
+    const result = await handleUserMessage(config, {
+      source: "discord",
+      text,
+      imagePaths: images.paths,
+      history,
+      conversationKey: key
+    });
+    conversationHistory.set(key, result.history.slice(-12));
+    await replyToMessageInChunks(message, result.response);
+  } catch (error) {
+    await message
+      .reply({
+        content: `Ask error: ${error instanceof Error ? error.message : String(error)}`,
+        allowedMentions: { repliedUser: false }
+      })
+      .catch(() => undefined);
+  } finally {
+    if (typingInterval) {
+      clearInterval(typingInterval);
+    }
+    await images?.cleanup();
+  }
 }
 
 async function handleThread(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -515,24 +597,36 @@ async function handleCodex(interaction: ChatInputCommandInteraction, config: App
       case "ask": {
         const prompt = interaction.options.getString("prompt", true);
         const binding = await getRequiredCodexBinding(key);
-        const result = await runCodexControlPrompt({
-          appConfig: config,
-          conversationKey: key,
-          prompt,
-          sessionId: binding.sessionId
-        });
-        await replyInChunks(interaction, formatCodexRunResult(result), { ephemeral: true });
+        const images = await downloadImageAttachments(interaction);
+        try {
+          const result = await runCodexControlPrompt({
+            appConfig: config,
+            conversationKey: key,
+            imagePaths: images.paths,
+            prompt,
+            sessionId: binding.sessionId
+          });
+          await replyInChunks(interaction, formatCodexRunResult(result), { ephemeral: true });
+        } finally {
+          await images.cleanup();
+        }
         return;
       }
       case "new": {
         const prompt = interaction.options.getString("prompt", true);
-        const result = await runCodexControlPrompt({
-          appConfig: config,
-          conversationKey: key,
-          forceNew: true,
-          prompt
-        });
-        await replyInChunks(interaction, formatCodexRunResult(result), { ephemeral: true });
+        const images = await downloadImageAttachments(interaction);
+        try {
+          const result = await runCodexControlPrompt({
+            appConfig: config,
+            conversationKey: key,
+            forceNew: true,
+            imagePaths: images.paths,
+            prompt
+          });
+          await replyInChunks(interaction, formatCodexRunResult(result), { ephemeral: true });
+        } finally {
+          await images.cleanup();
+        }
         return;
       }
       case "history": {
@@ -698,6 +792,32 @@ async function replyInChunks(
   }
 }
 
+async function replyToMessageInChunks(message: Message, content: string): Promise<void> {
+  if (!isSendableMessageChannel(message.channel)) {
+    return;
+  }
+
+  const chunks = chunkDiscordMessage(content);
+  await message.reply({ content: chunks[0], allowedMentions: { repliedUser: false } });
+  for (const chunk of chunks.slice(1)) {
+    await message.channel.send({ content: chunk, allowedMentions: { repliedUser: false } });
+  }
+}
+
+async function sendTyping(channel: Message["channel"]): Promise<void> {
+  if ("sendTyping" in channel && typeof channel.sendTyping === "function") {
+    await channel.sendTyping().catch(() => undefined);
+  }
+}
+
+type SendableMessageChannel = Message["channel"] & {
+  send(options: { content: string; allowedMentions?: { repliedUser: boolean } }): Promise<unknown>;
+};
+
+function isSendableMessageChannel(channel: Message["channel"]): channel is SendableMessageChannel {
+  return "send" in channel && typeof channel.send === "function";
+}
+
 function discordConversationKey(interaction: DiscordConversationInteraction): string {
   return `discord:${interaction.channelId}:${interaction.user.id}`;
 }
@@ -787,4 +907,19 @@ function formatCodexRunResult(result: CodexControlRunResult): string {
 function truncateDiscordOptionDescription(text: string): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
   return oneLine.length <= 100 ? oneLine : `${oneLine.slice(0, 97).trimEnd()}...`;
+}
+
+function stripBotMention(content: string, botUserId: string): string {
+  return content
+    .replace(new RegExp(`<@!?${escapeRegExp(botUserId)}>`, "g"), "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function defaultMentionPrompt(imageCount: number): string {
+  return imageCount ? "Please analyze the attached image(s)." : "";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
